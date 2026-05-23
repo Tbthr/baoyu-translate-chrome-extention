@@ -16,16 +16,18 @@ export function injectTranslations(translations: ParagraphTranslation[], isDraft
 
     const container = document.createElement('div');
     container.className = CONTAINER_CLASS;
+    container.style.marginBottom = '16px';
 
     const translationEl = document.createElement('div');
     translationEl.className = TRANSLATION_CLASS;
     translationEl.textContent = t.translatedText;
     translationEl.style.cssText = [
-      'margin-top: 6px',
-      'padding: 6px 0 6px 12px',
+      'margin-top: 4px',
+      'padding: 4px 0 4px 12px',
       'border-left: 3px solid #ccc',
       'color: #333',
       'line-height: 1.7',
+      'font-size: 0.95em',
       isDraft ? 'opacity: 0.6' : 'opacity: 1',
       'transition: opacity 0.3s ease',
     ].join(';');
