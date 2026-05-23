@@ -16,7 +16,8 @@ export function injectTranslations(translations: ParagraphTranslation[], isDraft
 
     const container = document.createElement('div');
     container.className = CONTAINER_CLASS;
-    container.style.marginBottom = '16px';
+    container.style.marginTop = '-8px';
+    container.style.marginBottom = '24px';
 
     const translationEl = document.createElement('div');
     translationEl.className = TRANSLATION_CLASS;
