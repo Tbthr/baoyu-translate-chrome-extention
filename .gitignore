@@ -1,0 +1,8 @@
+ai-provider-test.txt
+node_modules/
+dist/
+*.log
+.env*
+.DS_Store
+*.tmp
+*.swp
