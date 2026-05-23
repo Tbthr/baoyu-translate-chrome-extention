@@ -2,6 +2,7 @@ import { MSG } from '../shared/messages';
 import {
   getProviderConfig,
   saveProviderConfig,
+  getProviderConfigById,
   getLastMode,
   saveLastMode,
   saveTask,
@@ -38,6 +39,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (type) {
     case MSG.GET_PROVIDER_CONFIG:
       getProviderConfig().then(sendResponse);
+      return true;
+
+    case MSG.GET_PROVIDER_CONFIG_BY_ID:
+      getProviderConfigById(payload as string).then(sendResponse);
       return true;
 
     case MSG.SAVE_PROVIDER_CONFIG:

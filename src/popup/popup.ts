@@ -46,6 +46,36 @@ function setupSegmentedControl(): void {
     if (!btn?.dataset.mode) return;
     setMode(btn.dataset.mode as TranslationMode);
   });
+
+  control.addEventListener('mouseenter', (e) => {
+    const btn = (e.target as HTMLElement).closest('.seg-btn') as HTMLElement;
+    if (!btn) return;
+    const tooltip = btn.querySelector('.tooltip') as HTMLElement;
+    if (!tooltip) return;
+    positionTooltip(btn, tooltip);
+  }, true);
+}
+
+function positionTooltip(btn: HTMLElement, tooltip: HTMLElement): void {
+  const POPUP_WIDTH = 320;
+  const TOOLTIP_WIDTH = 240;
+  const ARROW_WIDTH = 12;
+  const PADDING = 8;
+
+  const btnRect = btn.getBoundingClientRect();
+  const btnCenter = btnRect.left + btnRect.width / 2;
+
+  let tooltipLeft = btnCenter - TOOLTIP_WIDTH / 2;
+
+  if (tooltipLeft < PADDING) tooltipLeft = PADDING;
+  if (tooltipLeft + TOOLTIP_WIDTH > POPUP_WIDTH - PADDING) tooltipLeft = POPUP_WIDTH - PADDING - TOOLTIP_WIDTH;
+
+  // Convert from viewport-relative to btn-relative
+  const relativeLeft = tooltipLeft - btnRect.left;
+  tooltip.style.left = `${relativeLeft}px`;
+
+  const arrowLeft = btnCenter - tooltipLeft - ARROW_WIDTH / 2;
+  tooltip.style.setProperty('--arrow-left', `${Math.max(ARROW_WIDTH, Math.min(TOOLTIP_WIDTH - ARROW_WIDTH, arrowLeft))}px`);
 }
 
 function setMode(mode: TranslationMode): void {
@@ -53,7 +83,6 @@ function setMode(mode: TranslationMode): void {
   document.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
   const target = document.querySelector(`.seg-btn[data-mode="${mode}"]`);
   if (target) target.classList.add('active');
-  sendMessage(MSG.SAVE_PROVIDER_CONFIG, { mode }).catch(() => {});
   chrome.runtime.sendMessage({ type: 'SAVE_LAST_MODE', payload: mode });
 }
 
@@ -108,23 +137,47 @@ function selectProvider(preset: typeof PRESET_PROVIDERS[number]): void {
   const trigger = $<HTMLDivElement>('select-trigger');
   const dropdown = $<HTMLDivElement>('provider-dropdown');
 
-  $<HTMLSpanElement>('trigger-dot').style.background = preset.color;
-  $<HTMLSpanElement>('trigger-name').textContent = preset.name;
-  $<HTMLSpanElement>('trigger-model').textContent = preset.model;
-
-  $<HTMLInputElement>('input-base-url').value = preset.baseUrl;
-  $<HTMLInputElement>('input-model').value = preset.model;
-
-  if (preset.id === 'custom') {
-    toggleMoreSettings(true);
+  // Save current provider's config before switching
+  const prevProvider = currentProvider;
+  if (prevProvider) {
+    const currentBaseUrl = $<HTMLInputElement>('input-base-url').value.trim();
+    const currentApiKey = $<HTMLInputElement>('input-api-key').value.trim();
+    const currentModel = $<HTMLInputElement>('input-model').value.trim();
+    if (currentBaseUrl || currentApiKey || currentModel) {
+      const saveConfig: ProviderConfig = {
+        id: prevProvider.id,
+        name: prevProvider.name,
+        baseUrl: currentBaseUrl,
+        apiKey: currentApiKey,
+        model: currentModel,
+        color: prevProvider.color,
+      };
+      chrome.runtime.sendMessage({ type: MSG.SAVE_PROVIDER_CONFIG, payload: saveConfig });
+    }
   }
 
-  renderProviderDropdown();
+  // Try to load saved config for the new provider
+  sendMessage(MSG.GET_PROVIDER_CONFIG_BY_ID, preset.id).then((saved) => {
+    const config = saved as ProviderConfig | null;
+    $<HTMLSpanElement>('trigger-dot').style.background = preset.color;
+    $<HTMLSpanElement>('trigger-name').textContent = preset.name;
+    $<HTMLSpanElement>('trigger-model').textContent = config?.model || preset.model;
+
+    $<HTMLInputElement>('input-base-url').value = config?.baseUrl || preset.baseUrl;
+    $<HTMLInputElement>('input-api-key').value = config?.apiKey || '';
+    $<HTMLInputElement>('input-model').value = config?.model || preset.model;
+
+    currentProvider = config || { id: preset.id, name: preset.name, baseUrl: preset.baseUrl, apiKey: '', model: preset.model, color: preset.color };
+
+    if (preset.id === 'custom') {
+      toggleMoreSettings(true);
+    }
+
+    renderProviderDropdown();
+  });
 
   trigger.classList.remove('open');
   dropdown.classList.remove('open');
-
-  saveCurrentConfig();
 }
 
 function applyProviderConfig(config: ProviderConfig): void {

@@ -9,12 +9,24 @@ function storageLocal(): chrome.storage.StorageArea {
 }
 
 export async function getProviderConfig(): Promise<ProviderConfig | null> {
-  const result = await storageSync().get('provider_config');
-  return (result.provider_config as ProviderConfig) ?? null;
+  const result = await storageSync().get(['provider_config', 'provider_configs']);
+  const current = (result.provider_config as { id: string }) ?? null;
+  if (!current?.id) return null;
+  const allConfigs = (result.provider_configs as Record<string, ProviderConfig>) ?? {};
+  return allConfigs[current.id] ?? null;
 }
 
 export async function saveProviderConfig(config: ProviderConfig): Promise<void> {
-  await storageSync().set({ provider_config: config });
+  const result = await storageSync().get('provider_configs');
+  const allConfigs = (result.provider_configs as Record<string, ProviderConfig>) ?? {};
+  allConfigs[config.id] = config;
+  await storageSync().set({ provider_config: { id: config.id }, provider_configs: allConfigs });
+}
+
+export async function getProviderConfigById(id: string): Promise<ProviderConfig | null> {
+  const result = await storageSync().get('provider_configs');
+  const allConfigs = (result.provider_configs as Record<string, ProviderConfig>) ?? {};
+  return allConfigs[id] ?? null;
 }
 
 export async function getLastMode(): Promise<TranslationMode> {
