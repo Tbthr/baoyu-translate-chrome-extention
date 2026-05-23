@@ -1,12 +1,12 @@
 import type { ParagraphTranslation } from '../shared/types';
-import { Readability } from '@mozilla/readability';
+import Defuddle from 'defuddle';
 
 interface ExtractedParagraph {
   index: number;
   selector: string;
   text: string;
   isCodeBlock: boolean;
-  element: HTMLElement;
+  element: HTMLElement | null;
 }
 
 let extractedParagraphs: ExtractedParagraph[] = [];
@@ -16,39 +16,37 @@ export function getExtractedParagraphs(): ExtractedParagraph[] {
 }
 
 export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText: string } | null {
-  const clonedDoc = document.cloneNode(true) as Document;
-  const reader = new Readability(clonedDoc);
-  const article = reader.parse();
-
-  if (!article || !article.textContent || article.textContent.trim().length < 100) {
+  let result: ReturnType<Defuddle['parse']>;
+  try {
+    result = new Defuddle(document).parse();
+  } catch {
     return null;
   }
 
-  const selectorStr = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, td';
-  const elements = document.querySelectorAll(selectorStr);
+  if (!result?.content || result.content.trim().length < 100) return null;
+
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = result.content;
+
+  const contentElements = tempDiv.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+  if (contentElements.length === 0) return null;
+
   extractedParagraphs = [];
-
-  const nonArticleContent = !article.title && !article.content;
-  if (nonArticleContent) return null;
-
   let index = 0;
-  elements.forEach((el) => {
-    const htmlEl = el as HTMLElement;
-    if (!isInArticleBody(htmlEl)) return;
 
-    const text = htmlEl.textContent?.trim() ?? '';
-    if (text.length === 0) return;
+  for (const el of contentElements) {
+    const text = (el as HTMLElement).textContent?.trim() ?? '';
+    if (!text) continue;
 
-    const isCodeBlock =
-      htmlEl.tagName === 'PRE' ||
-      htmlEl.tagName === 'CODE' ||
-      !!htmlEl.closest('pre') ||
-      !!htmlEl.closest('code');
+    const isCodeBlock = !!el.closest('pre') || !!el.closest('code');
+    const liveElement = findLiveElement(text);
+    const selector = liveElement ? generateSelector(liveElement) : '';
 
-    const selector = generateSelector(htmlEl);
-    extractedParagraphs.push({ index, selector, text, isCodeBlock, element: htmlEl });
+    extractedParagraphs.push({ index, selector, text, isCodeBlock, element: liveElement });
     index++;
-  });
+  }
+
+  if (extractedParagraphs.length === 0) return null;
 
   const fullText = extractedParagraphs
     .filter((p) => !p.isCodeBlock)
@@ -67,12 +65,23 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
   return { paragraphs, fullText };
 }
 
-function isInArticleBody(el: HTMLElement): boolean {
-  const skipSelectors = ['nav', 'header', 'footer', 'aside', '.sidebar', '.navigation', '.menu', '.ad', '.advertisement', '.comment', '#comments'];
-  for (const sel of skipSelectors) {
-    if (el.closest(sel)) return false;
+function findLiveElement(text: string): HTMLElement | null {
+  const selectors = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, td, font';
+  const candidates = document.querySelectorAll(selectors);
+
+  for (const el of candidates) {
+    if (el.textContent?.trim() === text) return el as HTMLElement;
   }
-  return true;
+
+  if (text.length > 40) {
+    const prefix = text.substring(0, 40);
+    for (const el of candidates) {
+      const elText = el.textContent?.trim() ?? '';
+      if (elText.length > 40 && elText.substring(0, 40) === prefix) return el as HTMLElement;
+    }
+  }
+
+  return null;
 }
 
 function generateSelector(el: HTMLElement): string {
@@ -102,5 +111,6 @@ function generateSelector(el: HTMLElement): string {
 }
 
 export function getElementBySelector(selector: string): HTMLElement | null {
+  if (!selector) return null;
   return document.querySelector(selector);
 }
