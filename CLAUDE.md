@@ -11,3 +11,8 @@ Default five-role label vocabulary: needs-triage, needs-info, ready-for-agent, r
 ### Domain docs
 
 Single-context layout: CONTEXT.md + docs/adr/ at repo root. See `docs/agents/domain.md`.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
