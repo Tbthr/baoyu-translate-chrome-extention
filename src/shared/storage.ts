@@ -19,7 +19,7 @@ export async function saveProviderConfig(config: ProviderConfig): Promise<void> 
 
 export async function getLastMode(): Promise<TranslationMode> {
   const result = await storageSync().get('last_mode');
-  return (result.last_mode as TranslationMode) ?? 'quick';
+  return (result.last_mode as TranslationMode) ?? 'normal';
 }
 
 export async function saveLastMode(mode: TranslationMode): Promise<void> {

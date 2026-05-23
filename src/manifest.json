@@ -5,6 +5,7 @@
   "description": "网页文章翻译插件，支持快翻/普通/精翻三种模式",
   "permissions": [
     "activeTab",
+    "tabs",
     "storage",
     "scripting"
   ],

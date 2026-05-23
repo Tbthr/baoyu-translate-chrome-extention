@@ -2,7 +2,7 @@ import { MSG } from '../shared/messages';
 import { PRESET_PROVIDERS } from '../shared/constants';
 import type { ProviderConfig, TranslationMode } from '../shared/types';
 
-let currentMode: TranslationMode = 'quick';
+let currentMode: TranslationMode = 'normal';
 let currentProvider: ProviderConfig | null = null;
 let isTranslating = false;
 let isTranslated = false;

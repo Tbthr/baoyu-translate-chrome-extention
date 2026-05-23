@@ -6,9 +6,7 @@ chrome.runtime.sendMessage({ type: MSG.CONTENT_READY, payload: { url: window.loc
 
 const port = chrome.runtime.connect({ name: 'keepalive' });
 
-port.onMessage.addListener((message) => {
-  const { type, payload } = message;
-
+function handleMessage(type: string, payload: any) {
   switch (type) {
     case MSG.INJECT_TRANSLATION:
       injectTranslations(payload.translations, payload.isDraft);
@@ -32,6 +30,10 @@ port.onMessage.addListener((message) => {
       showErrorBanner(payload.message);
       break;
   }
+}
+
+port.onMessage.addListener((message) => {
+  handleMessage(message.type, message.payload);
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -40,4 +42,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse(result);
     return true;
   }
+  // Handle translation messages sent via chrome.tabs.sendMessage
+  handleMessage(message.type, message.payload);
 });

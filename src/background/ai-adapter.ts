@@ -10,7 +10,7 @@ export async function chat(params: ChatParams): Promise<ChatResult> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model, messages, temperature }),
+    body: JSON.stringify({ model, messages, temperature, stream: true }),
   });
 
   if (!response.ok) {
@@ -18,11 +18,39 @@ export async function chat(params: ChatParams): Promise<ChatResult> {
     throw new Error(`API error ${response.status}: ${text || response.statusText}`);
   }
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content ?? '';
-  const usage = data.usage
-    ? { inputTokens: data.usage.prompt_tokens ?? 0, outputTokens: data.usage.completion_tokens ?? 0 }
-    : undefined;
+  // Read streaming response
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let content = '';
+  let usage: { inputTokens: number; outputTokens: number } | undefined;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value, { stream: true });
+    const lines = chunk.split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data:')) continue;
+
+      const data = trimmed.slice(5).trim();
+      if (data === '[DONE]') continue;
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) content += delta;
+        if (parsed.usage) {
+          usage = {
+            inputTokens: parsed.usage.prompt_tokens ?? 0,
+            outputTokens: parsed.usage.completion_tokens ?? 0,
+          };
+        }
+      } catch {}
+    }
+  }
 
   return { content, usage };
 }
