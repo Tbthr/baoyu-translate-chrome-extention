@@ -13,6 +13,7 @@ const mockChrome = {
   },
   runtime: {
     onMessage: { addListener: vi.fn() },
+    onConnect: { addListener: vi.fn() },
     sendMessage: vi.fn(),
     connect: vi.fn(() => ({ onMessage: { addListener: vi.fn() } })),
   },
