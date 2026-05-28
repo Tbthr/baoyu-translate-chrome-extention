@@ -4,7 +4,7 @@ import { getElementBySelector } from './extractor';
 const TRANSLATION_CLASS = 'baoyu-translation';
 const CONTAINER_CLASS = 'baoyu-translation-container';
 
-export function injectTranslations(translations: ParagraphTranslation[], isDraft = false): void {
+export function injectTranslations(translations: ParagraphTranslation[]): void {
   for (const t of translations) {
     if (t.isCodeBlock) continue;
     if (!t.translatedText) continue;
@@ -30,7 +30,7 @@ export function injectTranslations(translations: ParagraphTranslation[], isDraft
       'color: #333',
       'line-height: 1.7',
       'font-size: 0.95em',
-      isDraft ? 'opacity: 0.6' : 'opacity: 1',
+      'opacity: 1',
       'transition: opacity 0.3s ease',
     ].join(';');
 
@@ -38,24 +38,6 @@ export function injectTranslations(translations: ParagraphTranslation[], isDraft
 
     container.appendChild(translationEl);
     original.insertAdjacentElement('afterend', container);
-  }
-}
-
-export function updateTranslations(translations: ParagraphTranslation[]): void {
-  for (const t of translations) {
-    if (t.isCodeBlock) continue;
-    if (!t.translatedText) continue;
-
-    const original = getElementBySelector(t.originalSelector);
-    if (!original) continue;
-
-    const existing = original.nextElementSibling?.querySelector(`.${TRANSLATION_CLASS}`) as HTMLElement | null;
-    if (existing) {
-      existing.textContent = t.translatedText;
-      existing.style.opacity = '1';
-    } else {
-      injectTranslations([t]);
-    }
   }
 }
 

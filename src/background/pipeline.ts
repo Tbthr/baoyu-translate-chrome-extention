@@ -1,5 +1,5 @@
 import { BATCH_WORD_LIMIT } from '../shared/constants';
-import { quickTranslate, analyzeArticle, translateWithContext } from './translator';
+import { quickTranslate, analyzeArticle, translateWithContext, reviewTranslations, polishTranslations } from './translator';
 import type { ParagraphTranslation, TranslationMode, PipelineOptions, PipelineProgress } from '../shared/types';
 
 export interface Provider {
@@ -20,6 +20,10 @@ export async function translate(
 
   if (mode === 'normal') {
     return translateNormal(paragraphs, provider, options);
+  }
+
+  if (mode === 'refined') {
+    return translateRefined(paragraphs, provider, options);
   }
 
   throw new Error(`Mode '${mode}' not yet implemented in pipeline`);
@@ -93,6 +97,67 @@ async function translateNormal(
   }
 
   return results;
+}
+
+async function translateRefined(
+  paragraphs: ParagraphTranslation[],
+  provider: Provider,
+  options?: PipelineOptions,
+): Promise<ParagraphTranslation[]> {
+  // Analyze step
+  options?.onProgress?.({ step: 'analyze' });
+
+  if (options?.signal?.aborted) {
+    throw new AbortError('Translation cancelled');
+  }
+
+  const fullText = options?.fullText ?? paragraphs.map(p => p.originalText).join('\n\n');
+  const analysis = await analyzeArticle(fullText, provider);
+
+  // Translate step
+  options?.onProgress?.({ step: 'translate' });
+
+  if (options?.signal?.aborted) {
+    throw new AbortError('Translation cancelled');
+  }
+
+  const batches = splitIntoBatches(paragraphs);
+  const totalBatches = batches.length;
+  const results: ParagraphTranslation[] = [];
+
+  for (let i = 0; i < batches.length; i++) {
+    options?.onProgress?.({
+      step: 'translate',
+      batchProgress: { current: i + 1, total: totalBatches },
+    });
+
+    if (options?.signal?.aborted) {
+      throw new AbortError('Translation cancelled');
+    }
+
+    const batchResults = await translateWithContext(batches[i], analysis, provider, 'refined');
+    results.push(...batchResults.map((p) => ({ ...p, batchIndex: i })));
+  }
+
+  // Review step
+  options?.onProgress?.({ step: 'review' });
+
+  if (options?.signal?.aborted) {
+    throw new AbortError('Translation cancelled');
+  }
+
+  const reviewed = await reviewTranslations(results, provider);
+
+  // Polish step
+  options?.onProgress?.({ step: 'polish' });
+
+  if (options?.signal?.aborted) {
+    throw new AbortError('Translation cancelled');
+  }
+
+  const polished = await polishTranslations(reviewed, provider);
+
+  return polished;
 }
 
 function splitIntoBatches(paragraphs: ParagraphTranslation[]): ParagraphTranslation[][] {

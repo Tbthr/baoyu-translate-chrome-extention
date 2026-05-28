@@ -1,6 +1,6 @@
 import { MSG } from '../shared/messages';
 import { extractContent } from './extractor';
-import { injectTranslations, updateTranslations, showFloatingIndicator, hideFloatingIndicator, showErrorBanner } from './injector';
+import { injectTranslations, showFloatingIndicator, hideFloatingIndicator, showErrorBanner } from './injector';
 
 chrome.runtime.sendMessage({ type: MSG.CONTENT_READY, payload: { url: window.location.href } });
 
@@ -9,10 +9,7 @@ const port = chrome.runtime.connect({ name: 'keepalive' });
 function handleMessage(type: string, payload: any) {
   switch (type) {
     case MSG.INJECT_TRANSLATION:
-      injectTranslations(payload.translations, payload.isDraft);
-      break;
-    case MSG.REVIEW_UPDATE:
-      updateTranslations(payload.translations);
+      injectTranslations(payload.translations);
       break;
     case MSG.SHOW_FLOATING_INDICATOR:
       if (payload.step === 'hide') {

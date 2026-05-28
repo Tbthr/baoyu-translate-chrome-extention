@@ -31,6 +31,11 @@ function mockChatResponse(translatedTexts: string[]) {
 describe('Pipeline translate()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('quick mode produces correct translations', async () => {
@@ -138,6 +143,11 @@ describe('Pipeline translate()', () => {
 describe('Pipeline normal mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('normal mode produces correct translations via analyze → translate', async () => {
@@ -279,7 +289,166 @@ describe('Pipeline normal mode', () => {
   });
 });
 
+describe('Pipeline refined mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    // Reset the mock completely to clear any default implementation
+    (mockChat as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it('refined mode produces correct translations via analyze → translate → review → polish', async () => {
+    const paragraphs = [
+      makeParagraph('Hello world', 0),
+      makeParagraph('This is a test', 1),
+    ];
+    const fullText = 'Hello world\n\nThis is a test';
+
+    // 1. analyzeArticle response
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        domain: 'general',
+        glossary: [],
+        culturalNotes: [],
+        difficulties: [],
+        summary: 'Test summary',
+      }),
+    });
+    // 2. translateWithContext response
+    mockChat.mockResolvedValueOnce({
+      content: ['初始翻译一', '初始翻译二'].join('\n\n'),
+    });
+    // 3. reviewTranslations response
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify(['审校翻译一', '审校翻译二']),
+    });
+    // 4. polishTranslations response
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify(['润色翻译一', '润色翻译二']),
+    });
+
+    const result = await translate(paragraphs, 'refined', {
+      baseUrl: 'https://api.test.com',
+      apiKey: 'test-key',
+      model: 'test-model',
+    }, { fullText });
+
+    expect(result).toHaveLength(2);
+    expect(result[0].translatedText).toBe('润色翻译一');
+    expect(result[1].translatedText).toBe('润色翻译二');
+    expect(mockChat).toHaveBeenCalledTimes(4);
+  });
+
+  it('refined mode emits step progress for all four steps', async () => {
+    const paragraphs = [makeParagraph('Hello world', 0)];
+
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        domain: 'general',
+        glossary: [],
+        culturalNotes: [],
+        difficulties: [],
+        summary: 'Test',
+      }),
+    });
+    mockChat.mockResolvedValueOnce({
+      content: '初始翻译',
+    });
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify(['审校翻译']),
+    });
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify(['润色翻译']),
+    });
+
+    const progressEvents: { step: string; batchProgress?: { current: number; total: number } }[] = [];
+
+    await translate(paragraphs, 'refined', {
+      baseUrl: 'https://api.test.com',
+      apiKey: 'test-key',
+      model: 'test-model',
+    }, {
+      fullText: 'Hello world',
+      onProgress: (progress) => progressEvents.push(progress),
+    });
+
+    expect(progressEvents.some(p => p.step === 'analyze')).toBe(true);
+    expect(progressEvents.some(p => p.step === 'translate')).toBe(true);
+    expect(progressEvents.some(p => p.step === 'review')).toBe(true);
+    expect(progressEvents.some(p => p.step === 'polish')).toBe(true);
+  });
+
+  it('refined mode aborts between steps when signal is aborted', async () => {
+    const paragraphs = [makeParagraph('Hello world', 0)];
+    const controller = new AbortController();
+
+    // analyzeArticle completes
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        domain: 'general',
+        glossary: [],
+        culturalNotes: [],
+        difficulties: [],
+        summary: 'Test',
+      }),
+    });
+    // Abort before translate
+    controller.abort();
+
+    await expect(
+      translate(paragraphs, 'refined', {
+        baseUrl: 'https://api.test.com',
+        apiKey: 'test-key',
+        model: 'test-model',
+      }, {
+        fullText: 'Hello world',
+        signal: controller.signal,
+      })
+    ).rejects.toThrow(AbortError);
+  });
+
+  it('refined mode aborts during review step', async () => {
+    const paragraphs = [makeParagraph('Hello world', 0)];
+    const controller = new AbortController();
+
+    // analyzeArticle completes
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        domain: 'general',
+        glossary: [],
+        culturalNotes: [],
+        difficulties: [],
+        summary: 'Test',
+      }),
+    });
+    // translateWithContext completes
+    mockChat.mockResolvedValueOnce({
+      content: '初始翻译',
+    });
+    // reviewTranslations starts, then abort
+    mockChat.mockResolvedValueOnce({
+      content: JSON.stringify(['审校翻译']),
+    });
+    // Abort during polish
+    controller.abort();
+
+    await expect(
+      translate(paragraphs, 'refined', {
+        baseUrl: 'https://api.test.com',
+        apiKey: 'test-key',
+        model: 'test-model',
+      }, {
+        fullText: 'Hello world',
+        signal: controller.signal,
+      })
+    ).rejects.toThrow(AbortError);
+  });
+});
+
 describe('empty input and batch boundary conditions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('handles empty input gracefully', async () => {
     mockChatResponse(['你好世界', '这是一个测试']);
