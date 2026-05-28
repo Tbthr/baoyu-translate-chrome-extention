@@ -1,5 +1,5 @@
 import { BATCH_WORD_LIMIT } from '../shared/constants';
-import { quickTranslate, analyzeArticle, translateWithContext } from './translator';
+import { quickTranslate, analyzeArticle, translateWithContext, reviewTranslations, polishTranslations } from './translator';
 import type { ParagraphTranslation, TranslationMode, PipelineOptions, PipelineProgress } from '../shared/types';
 
 export interface Provider {
@@ -22,6 +22,10 @@ export async function translate(
     return translateNormal(paragraphs, provider, options);
   }
 
+  if (mode === 'refined') {
+    return translateRefined(paragraphs, provider, options);
+  }
+
   throw new Error(`Mode '${mode}' not yet implemented in pipeline`);
 }
 
@@ -30,25 +34,9 @@ async function translateQuick(
   provider: Provider,
   options?: PipelineOptions,
 ): Promise<ParagraphTranslation[]> {
-  const batches = splitIntoBatches(paragraphs);
-  const totalBatches = batches.length;
-  const results: ParagraphTranslation[] = [];
-
-  for (let i = 0; i < batches.length; i++) {
-    options?.onProgress?.({
-      step: 'translate',
-      batchProgress: { current: i + 1, total: totalBatches },
-    });
-
-    if (options?.signal?.aborted) {
-      throw new AbortError('Translation cancelled');
-    }
-
-    const batchResults = await quickTranslate(batches[i], '', provider);
-    results.push(...batchResults.map((p) => ({ ...p, batchIndex: i })));
-  }
-
-  return results;
+  return processBatches(paragraphs, options, async (batch) =>
+    quickTranslate(batch, '', provider)
+  );
 }
 
 async function translateNormal(
@@ -56,23 +44,54 @@ async function translateNormal(
   provider: Provider,
   options?: PipelineOptions,
 ): Promise<ParagraphTranslation[]> {
-  // Analyze step
   options?.onProgress?.({ step: 'analyze' });
-
-  if (options?.signal?.aborted) {
-    throw new AbortError('Translation cancelled');
-  }
+  checkAbort(options);
 
   const fullText = options?.fullText ?? paragraphs.map(p => p.originalText).join('\n\n');
   const analysis = await analyzeArticle(fullText, provider);
 
-  // Translate step
   options?.onProgress?.({ step: 'translate' });
 
-  if (options?.signal?.aborted) {
-    throw new AbortError('Translation cancelled');
-  }
+  return processBatches(paragraphs, options, async (batch) =>
+    translateWithContext(batch, analysis, provider, 'normal')
+  );
+}
 
+async function translateRefined(
+  paragraphs: ParagraphTranslation[],
+  provider: Provider,
+  options?: PipelineOptions,
+): Promise<ParagraphTranslation[]> {
+  options?.onProgress?.({ step: 'analyze' });
+  checkAbort(options);
+
+  const fullText = options?.fullText ?? paragraphs.map(p => p.originalText).join('\n\n');
+  const analysis = await analyzeArticle(fullText, provider);
+
+  options?.onProgress?.({ step: 'translate' });
+
+  const results = await processBatches(paragraphs, options, async (batch) =>
+    translateWithContext(batch, analysis, provider, 'refined')
+  );
+
+  options?.onProgress?.({ step: 'review' });
+  checkAbort(options);
+
+  const reviewed = await reviewTranslations(results, provider);
+
+  options?.onProgress?.({ step: 'polish' });
+  checkAbort(options);
+
+  const polished = await polishTranslations(reviewed, provider);
+
+  return polished;
+}
+
+async function processBatches(
+  paragraphs: ParagraphTranslation[],
+  options: PipelineOptions | undefined,
+  translateBatch: (batch: ParagraphTranslation[]) => Promise<ParagraphTranslation[]>,
+): Promise<ParagraphTranslation[]> {
   const batches = splitIntoBatches(paragraphs);
   const totalBatches = batches.length;
   const results: ParagraphTranslation[] = [];
@@ -82,17 +101,19 @@ async function translateNormal(
       step: 'translate',
       batchProgress: { current: i + 1, total: totalBatches },
     });
+    checkAbort(options);
 
-    if (options?.signal?.aborted) {
-      throw new AbortError('Translation cancelled');
-    }
-
-    // Pass pre-split batch to translateWithContext
-    const batchResults = await translateWithContext(batches[i], analysis, provider, 'normal');
+    const batchResults = await translateBatch(batches[i]);
     results.push(...batchResults.map((p) => ({ ...p, batchIndex: i })));
   }
 
   return results;
+}
+
+function checkAbort(options: PipelineOptions | undefined): void {
+  if (options?.signal?.aborted) {
+    throw new AbortError('Translation cancelled');
+  }
 }
 
 function splitIntoBatches(paragraphs: ParagraphTranslation[]): ParagraphTranslation[][] {
