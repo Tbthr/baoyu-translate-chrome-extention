@@ -7,13 +7,11 @@ import {
   saveLastMode,
   saveTask,
   getTask,
-  removeTask,
   urlHash,
 } from '../shared/storage';
 import { getCachedTranslation, saveTranslationCache } from './cache';
 import { startKeepalive, stopKeepalive, setupPortKeepalive } from './keepalive';
 import { translate } from './pipeline';
-import { analyzeArticle, translateWithContext, reviewTranslations, polishTranslations } from './translator';
 import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
 
 setupPortKeepalive();
@@ -166,101 +164,30 @@ async function runTranslation(
   hash: string,
 ): Promise<void> {
   const provider = { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model };
-  const mode = task.mode;
 
-  let translations = task.translations;
-
-  if (mode === 'quick') {
-    // Use pipeline for quick mode
-    task.status = 'translating';
-    task.currentStep = 'translate';
-    await updateTask(hash, task);
-
-    translations = await translate(translations, mode, provider, {
-      onProgress: (progress) => {
-        if (progress.batchProgress) {
-          sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
-            step: '正在翻译',
-            progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
-          });
-        } else {
-          sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: progress.step });
-        }
-      },
-    });
-
-    task.translations = translations;
-    task.status = 'completed';
-    await updateTask(hash, task);
-  } else {
-    // Normal / Refined: analyze first
-    task.status = 'analyzing';
-    task.currentStep = 'analyze';
-    await updateTask(hash, task);
-
-    await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '正在分析...' });
-
-    const analysis = await analyzeArticle(fullText, provider);
-    task.analysis = analysis;
-    await updateTask(hash, task);
-
-    // Translate with context
-    task.status = 'translating';
-    task.currentStep = 'translate';
-    await updateTask(hash, task);
-
-    const batches = splitIntoBatches(translations);
-    task.totalBatches = batches.length;
-
-    for (let i = 0; i < batches.length; i++) {
-      task.currentBatch = i + 1;
-      await updateTask(hash, task);
-      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
-        step: '正在翻译',
-        progress: `${i + 1}/${batches.length} 批`,
-      });
-
-      const batchResult = await translateWithContext(batches[i], analysis, provider, mode);
-
-      // Merge batch results
-      for (const t of batchResult) {
-        const idx = translations.findIndex((p) => p.index === t.index);
-        if (idx >= 0) translations[idx] = t;
+  const translations = await translate(task.translations, task.mode, provider, {
+    fullText,
+    onProgress: (progress) => {
+      if (progress.batchProgress) {
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
+          step: '正在翻译',
+          progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
+        });
+      } else {
+        const stepName = progress.step === 'analyze' ? '正在分析'
+          : progress.step === 'translate' ? '正在翻译'
+          : progress.step;
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName });
       }
+    },
+  });
 
-      task.translations = translations;
-      await updateTask(hash, task);
-      await sendToTab(tabId, MSG.INJECT_TRANSLATION, { translations: batchResult, isDraft: mode === 'refined' });
-    }
-
-    if (mode === 'refined') {
-      // Review step
-      task.status = 'reviewing';
-      task.currentStep = 'review';
-      await updateTask(hash, task);
-      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '正在审校...' });
-
-      translations = await reviewTranslations(translations, provider);
-      task.translations = translations;
-      await updateTask(hash, task);
-      await sendToTab(tabId, MSG.REVIEW_UPDATE, { translations });
-
-      // Polish step
-      task.status = 'polishing';
-      task.currentStep = 'polish';
-      await updateTask(hash, task);
-      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '正在润色...' });
-
-      translations = await polishTranslations(translations, provider);
-      task.translations = translations;
-    }
-
-    task.status = 'completed';
-    await updateTask(hash, task);
-  }
+  task.translations = translations;
+  task.status = 'completed';
+  await updateTask(hash, task);
 
   // Save to cache
-  await saveTranslationCache(task.url, translations, mode, config.id);
+  await saveTranslationCache(task.url, translations, task.mode, config.id);
 
   await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
   await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
@@ -269,27 +196,6 @@ async function runTranslation(
   setBadge('完成');
   setTimeout(clearBadge, 5000);
   stopKeepalive();
-}
-
-function splitIntoBatches(paragraphs: ParagraphTranslation[]): ParagraphTranslation[][] {
-  const BATCH_WORD_LIMIT = 4000;
-  const batches: ParagraphTranslation[][] = [];
-  let currentBatch: ParagraphTranslation[] = [];
-  let currentWordCount = 0;
-
-  for (const p of paragraphs) {
-    const wordCount = p.originalText.split(/\s+/).length;
-    if (currentWordCount + wordCount > BATCH_WORD_LIMIT && currentBatch.length > 0) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentWordCount = 0;
-    }
-    currentBatch.push(p);
-    currentWordCount += wordCount;
-  }
-
-  if (currentBatch.length > 0) batches.push(currentBatch);
-  return batches.length > 0 ? batches : [paragraphs];
 }
 
 async function updateTask(hash: string, task: TranslationTask): Promise<void> {

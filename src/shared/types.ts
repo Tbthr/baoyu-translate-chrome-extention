@@ -106,4 +106,5 @@ export interface PipelineProgress {
 export interface PipelineOptions {
   onProgress?: (progress: PipelineProgress) => void;
   signal?: AbortSignal;
+  fullText?: string;
 }
