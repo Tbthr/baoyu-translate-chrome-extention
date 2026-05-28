@@ -7,17 +7,20 @@ import {
   saveLastMode,
   saveTask,
   getTask,
+  removeTask,
   urlHash,
 } from '../shared/storage';
 import { getCachedTranslation, saveTranslationCache } from './cache';
 import { startKeepalive, stopKeepalive, setupPortKeepalive } from './keepalive';
-import { translate } from './pipeline';
+import { translate, AbortError } from './pipeline';
 import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
 
 setupPortKeepalive();
 recoverCrashedTask();
 
 let activeTaskId: string | null = null;
+let activeAbortController: AbortController | null = null;
+let activeUrl: string | null = null;
 
 async function recoverCrashedTask(): Promise<void> {
   const all = await chrome.storage.local.get(null);
@@ -96,6 +99,8 @@ async function handleStartTranslation(
   if (!config?.apiKey) return { error: '请先配置 API Key' };
 
   activeTaskId = crypto.randomUUID();
+  activeAbortController = new AbortController();
+  activeUrl = url;
   const task: TranslationTask = {
     id: activeTaskId,
     url,
@@ -138,7 +143,14 @@ async function handleStartTranslation(
   setBadge('翻译中');
 
   // Run translation in background
-  runTranslation(task, extraction.fullText, config, tabId, hash).catch(async (err) => {
+  runTranslation(task, extraction.fullText, config, tabId, hash, activeAbortController.signal).catch(async (err) => {
+    // AbortError means cancelled - clean up silently
+    if (err instanceof AbortError) {
+      clearBadge();
+      stopKeepalive();
+      return;
+    }
+
     task.status = 'failed';
     task.error = {
       step: task.currentStep ?? 'translate',
@@ -162,11 +174,13 @@ async function runTranslation(
   config: ProviderConfig,
   tabId: number,
   hash: string,
+  signal: AbortSignal,
 ): Promise<void> {
   const provider = { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model };
 
   const translations = await translate(task.translations, task.mode, provider, {
     fullText,
+    signal,
     onProgress: (progress) => {
       if (progress.batchProgress) {
         sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
@@ -210,15 +224,49 @@ async function handleGetTaskStatus(payload: { url: string }): Promise<unknown> {
 }
 
 async function handleCancelTranslation(): Promise<unknown> {
+  activeAbortController?.abort();
+  activeAbortController = null;
   activeTaskId = null;
+
+  if (activeUrl) {
+    const hash = urlHash(activeUrl);
+    await removeTask(hash);
+    await sendToTabForCurrentPage(MSG.CLEAR_TRANSLATIONS, {});
+    activeUrl = null;
+  }
+
   stopKeepalive();
   clearBadge();
   return { ok: true };
 }
 
+async function sendToTabForCurrentPage(type: string, payload: unknown): Promise<void> {
+  if (!activeUrl) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type, payload });
+    } catch {
+      // Tab may have been closed
+    }
+  }
+}
+
 async function handleRetryTranslation(): Promise<unknown> {
-  // TODO: Implement retry from checkpoint
-  return { ok: true };
+  // Re-trigger start translation with same mode (no resume logic)
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return { error: 'No active tab' };
+
+  // Get task to find the mode
+  const url = tab.url;
+  if (!url) return { error: 'No URL' };
+
+  const hash = urlHash(url);
+  const task = await getTask(hash);
+  if (!task) return { error: 'No task to retry' };
+
+  const taskMode = (task as TranslationTask).mode;
+  return handleStartTranslation({ mode: taskMode }, { tab });
 }
 
 async function sendToTab(tabId: number, type: string, payload: unknown): Promise<void> {

@@ -1,6 +1,6 @@
 import { MSG } from '../shared/messages';
 import { extractContent } from './extractor';
-import { injectTranslations, showFloatingIndicator, hideFloatingIndicator, showErrorBanner } from './injector';
+import { injectTranslations, showFloatingIndicator, hideFloatingIndicator, showErrorBanner, removeAllTranslations } from './injector';
 
 chrome.runtime.sendMessage({ type: MSG.CONTENT_READY, payload: { url: window.location.href } });
 
@@ -17,6 +17,9 @@ function handleMessage(type: string, payload: any) {
       } else {
         showFloatingIndicator(payload.step, payload.progress);
       }
+      break;
+    case MSG.CLEAR_TRANSLATIONS:
+      removeAllTranslations();
       break;
     case MSG.TRANSLATION_COMPLETE:
       hideFloatingIndicator();
