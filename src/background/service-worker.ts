@@ -307,7 +307,7 @@ async function handleRetryTranslation(): Promise<unknown> {
   return { ok: true };
 }
 
-export async function sendToTab(tabId: number, type: string, payload: unknown, controller?: AbortController | null): Promise<void> {
+export async function sendToTab(tabId: number, type: string, payload: unknown, controller?: AbortController): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { type, payload });
   } catch {
