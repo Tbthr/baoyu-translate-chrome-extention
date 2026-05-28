@@ -3,21 +3,18 @@ import type { AnalysisResult, ParagraphTranslation, ChatMessage, TranslationMode
 import { BATCH_WORD_LIMIT, MODE_RETRY_LIMITS } from '../shared/constants';
 
 export async function quickTranslate(
-  paragraphs: ParagraphTranslation[],
+  batch: ParagraphTranslation[],
   _fullText: string,
   provider: { baseUrl: string; apiKey: string; model: string },
 ): Promise<ParagraphTranslation[]> {
-  const batches = splitIntoBatches(paragraphs);
-  const results: ParagraphTranslation[] = [];
+  if (batch.length === 0) return [];
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const batchText = batch.map((p) => p.originalText).join('\n\n');
+  const batchText = batch.map((p) => p.originalText).join('\n\n');
 
-    const messages: ChatMessage[] = [
-      {
-        role: 'system',
-        content: `你是一位专业的英中翻译专家。将以下英文文章翻译为中文。
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: `你是一位专业的英中翻译专家。将以下英文文章翻译为中文。
 
 翻译要求：
 - 信达雅，译文自然流畅，读起来像中文原创
@@ -27,17 +24,12 @@ export async function quickTranslate(
 - 优先使用生动的中文口语，保留原文幽默感
 
 直接输出翻译后的中文文章。按照原文段落顺序输出，每个段落之间用空行分隔。`,
-      },
-      { role: 'user', content: batchText },
-    ];
+    },
+    { role: 'user', content: batchText },
+  ];
 
-    const result = await withRetry(() => chat({ ...provider, messages, temperature: 0.3 }), 2);
-
-    const translatedParagraphs = parseTranslationResponse(result.content, batch, i);
-    results.push(...translatedParagraphs);
-  }
-
-  return results;
+  const result = await withRetry(() => chat({ ...provider, messages, temperature: 0.3 }), 2);
+  return parseTranslationResponse(result.content, batch);
 }
 
 export async function analyzeArticle(
@@ -111,7 +103,7 @@ ${contextBlock}
       MODE_RETRY_LIMITS[mode] ?? 2,
     );
 
-    const translatedParagraphs = parseTranslationResponse(result.content, batch, i);
+    const translatedParagraphs = parseTranslationResponse(result.content, batch);
     results.push(...translatedParagraphs);
   }
 
@@ -232,7 +224,6 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T
 function parseTranslationResponse(
   content: string,
   originalBatch: ParagraphTranslation[],
-  batchIndex: number,
 ): ParagraphTranslation[] {
   const lines = content.split(/\n\s*\n/).filter((l) => l.trim());
   const results: ParagraphTranslation[] = [];
@@ -242,13 +233,13 @@ function parseTranslationResponse(
   for (let i = 0; i < originalBatch.length; i++) {
     const original = originalBatch[i];
     if (original.isCodeBlock) {
-      results.push({ ...original, batchIndex });
+      results.push({ ...original, batchIndex: 0 });
       continue;
     }
 
     const translatedIdx = nonCodeOriginals.indexOf(original);
     const translatedText = lines[translatedIdx]?.trim() ?? original.originalText;
-    results.push({ ...original, translatedText, batchIndex });
+    results.push({ ...original, translatedText, batchIndex: 0 });
   }
 
   return results;

@@ -12,7 +12,8 @@ import {
 } from '../shared/storage';
 import { getCachedTranslation, saveTranslationCache } from './cache';
 import { startKeepalive, stopKeepalive, setupPortKeepalive } from './keepalive';
-import { quickTranslate, analyzeArticle, translateWithContext, reviewTranslations, polishTranslations } from './translator';
+import { translate } from './pipeline';
+import { analyzeArticle, translateWithContext, reviewTranslations, polishTranslations } from './translator';
 import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
 
 setupPortKeepalive();
@@ -170,13 +171,23 @@ async function runTranslation(
   let translations = task.translations;
 
   if (mode === 'quick') {
+    // Use pipeline for quick mode
     task.status = 'translating';
     task.currentStep = 'translate';
     await updateTask(hash, task);
 
-    await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '正在翻译...' });
-
-    translations = await quickTranslate(translations, fullText, provider);
+    translations = await translate(translations, mode, provider, {
+      onProgress: (progress) => {
+        if (progress.batchProgress) {
+          sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
+            step: '正在翻译',
+            progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
+          });
+        } else {
+          sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: progress.step });
+        }
+      },
+    });
 
     task.translations = translations;
     task.status = 'completed';
