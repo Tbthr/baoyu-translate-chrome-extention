@@ -31,7 +31,7 @@ function stopKeepalive(): void {
   }
 }
 
-// Minimal port listener for future extension (previously setupPortKeepalive)
+// Setup port listener for keepalive
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'keepalive') {
     port.onDisconnect.addListener(() => {

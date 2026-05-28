@@ -24,7 +24,6 @@ const mockChrome = {
 
 vi.stubGlobal('chrome', mockChrome);
 
-
 // Mock cache
 vi.mock('./cache', () => ({
   getCachedTranslation: vi.fn().mockResolvedValue(null),
