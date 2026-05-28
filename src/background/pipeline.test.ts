@@ -135,13 +135,6 @@ describe('Pipeline translate()', () => {
   });
 });
 
-// Helper to mock sequential responses
-function mockChatResponseOnce(responses: string[]) {
-  mockChat.mockResolvedValueOnce({
-    content: responses.join('\n\n'),
-  });
-}
-
 describe('Pipeline normal mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -286,9 +279,7 @@ describe('Pipeline normal mode', () => {
   });
 });
 
-describe('splitIntoBatches boundary conditions', () => {
-  // Access the internal function via the public API behavior
-  // We test it indirectly through the batch progress reporting
+describe('empty input and batch boundary conditions', () => {
 
   it('handles empty input gracefully', async () => {
     mockChatResponse(['你好世界', '这是一个测试']);
