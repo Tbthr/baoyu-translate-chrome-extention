@@ -41,7 +41,7 @@ async function translateQuick(
     }
 
     const batchResults = await quickTranslate(batches[i], '', provider);
-    results.push(...batchResults.map((p, idx) => ({ ...p, batchIndex: i })));
+    results.push(...batchResults.map((p) => ({ ...p, batchIndex: i })));
   }
 
   return results;
