@@ -8,30 +8,12 @@ export interface Provider {
   model: string;
 }
 
-const MODE_STEPS: Record<TranslationMode, string[]> = {
-  quick: ['translate'],
-  normal: ['analyze', 'translate'],
-  refined: ['analyze', 'translate', 'review', 'polish'],
-};
-
 export async function translate(
   paragraphs: ParagraphTranslation[],
   mode: TranslationMode,
   provider: Provider,
   options?: PipelineOptions,
 ): Promise<ParagraphTranslation[]> {
-  const onProgress = options?.onProgress;
-  const signal = options?.signal;
-
-  function emit(progress: PipelineProgress): void {
-    onProgress?.(progress);
-    if (signal?.aborted) {
-      throw new AbortError('Translation cancelled');
-    }
-  }
-
-  emit({ step: 'translate' });
-
   if (mode === 'quick') {
     return translateQuick(paragraphs, provider, options);
   }
@@ -58,8 +40,8 @@ async function translateQuick(
       throw new AbortError('Translation cancelled');
     }
 
-    const batchResults = await quickTranslatePreSplit(batches[i], provider);
-    results.push(...batchResults);
+    const batchResults = await quickTranslate(batches[i], '', provider);
+    results.push(...batchResults.map((p, idx) => ({ ...p, batchIndex: i })));
   }
 
   return results;
@@ -88,20 +70,9 @@ function splitIntoBatches(paragraphs: ParagraphTranslation[]): ParagraphTranslat
   return batches.length > 0 ? batches : [paragraphs];
 }
 
-async function quickTranslatePreSplit(
-  batch: ParagraphTranslation[],
-  provider: Provider,
-): Promise<ParagraphTranslation[]> {
-  return quickTranslate(batch, '', provider);
-}
-
 export class AbortError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AbortError';
   }
-}
-
-export function getModeSteps(mode: TranslationMode): string[] {
-  return MODE_STEPS[mode] ?? [];
 }
