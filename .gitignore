@@ -7,5 +7,5 @@ dist/
 *.tmp
 *.swp
 chrome/
-skills-lock.json.sandcastle/
+skills-lock.json
 .sandcastle/

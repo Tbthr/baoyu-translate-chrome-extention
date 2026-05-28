@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "defuddle": "^0.18.1"
+    "defuddle": "^0.18.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.6.5",
     "@types/chrome": "^0.0.287",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",

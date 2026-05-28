@@ -19,6 +19,7 @@ setupPortKeepalive();
 recoverCrashedTask();
 
 let activeTaskId: string | null = null;
+let activeUrl: string | null = null;
 let abortController: AbortController | null = null;
 
 async function recoverCrashedTask(): Promise<void> {
@@ -98,6 +99,8 @@ async function handleStartTranslation(
   if (!config?.apiKey) return { error: '请先配置 API Key' };
 
   activeTaskId = crypto.randomUUID();
+  abortController = new AbortController();
+  activeUrl = url;
   const task: TranslationTask = {
     id: activeTaskId,
     url,
@@ -140,7 +143,14 @@ async function handleStartTranslation(
   setBadge('翻译中');
 
   // Run translation in background
-  runTranslation(task, extraction.fullText, config, tabId, hash).catch(async (err) => {
+  runTranslation(task, extraction.fullText, config, tabId, hash, abortController.signal).catch(async (err) => {
+    // AbortError means cancelled - clean up silently
+    if (err instanceof AbortError) {
+      clearBadge();
+      stopKeepalive();
+      return;
+    }
+
     task.status = 'failed';
     task.error = {
       step: task.currentStep ?? 'translate',
@@ -158,19 +168,29 @@ async function handleStartTranslation(
   return { taskId: task.id };
 }
 
+const STEP_NAMES: Record<string, string> = {
+  analyze: '正在分析',
+  translate: '正在翻译',
+};
+
+function stepName(step: string): string {
+  return STEP_NAMES[step] ?? step;
+}
+
 async function runTranslation(
   task: TranslationTask,
   fullText: string,
   config: ProviderConfig,
   tabId: number,
   hash: string,
+  signal: AbortSignal,
 ): Promise<void> {
   abortController = new AbortController();
   const provider = { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model };
 
   const translations = await translate(task.translations, task.mode, provider, {
     fullText,
-    signal: abortController.signal,
+    signal,
     onProgress: (progress) => {
       if (progress.batchProgress) {
         sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
@@ -178,10 +198,7 @@ async function runTranslation(
           progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
         });
       } else {
-        const stepName = progress.step === 'analyze' ? '正在分析'
-          : progress.step === 'translate' ? '正在翻译'
-          : progress.step;
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName });
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName(progress.step) });
       }
     },
   });
@@ -217,9 +234,29 @@ async function handleCancelTranslation(): Promise<unknown> {
   abortController?.abort();
   abortController = null;
   activeTaskId = null;
+
+  if (activeUrl) {
+    const hash = urlHash(activeUrl);
+    await removeTask(hash);
+    await sendToTabForCurrentPage(MSG.CLEAR_TRANSLATIONS, {});
+    activeUrl = null;
+  }
+
   stopKeepalive();
   clearBadge();
   return { ok: true };
+}
+
+async function sendToTabForCurrentPage(type: string, payload: unknown): Promise<void> {
+  if (!activeUrl) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, { type, payload });
+    } catch {
+      // Tab may have been closed
+    }
+  }
 }
 
 async function handleRetryTranslation(): Promise<unknown> {
@@ -238,7 +275,7 @@ async function handleRetryTranslation(): Promise<unknown> {
   }
 
   // Clear existing translations from page before retry
-  await sendToTab(tabId, 'CLEAR_TRANSLATIONS', {});
+  await sendToTab(tabId, MSG.CLEAR_TRANSLATIONS, {});
 
   // Start a fresh translation (aborts any current one)
   const config = await getProviderConfig();
@@ -252,7 +289,7 @@ async function handleRetryTranslation(): Promise<unknown> {
   setBadge('翻译中');
 
   // Run translation in background
-  runTranslation(task, '', config, tabId, hash).catch(async (err) => {
+  runTranslation(task, '', config, tabId, hash, abortController.signal).catch(async (err) => {
     task.status = 'failed';
     task.error = {
       step: task.currentStep ?? 'translate',
