@@ -29,6 +29,10 @@ function handleMessage(type: string, payload: any) {
       hideFloatingIndicator();
       showErrorBanner(payload.message);
       break;
+    case MSG.CLEAR_TRANSLATIONS:
+      hideFloatingIndicator();
+      removeAllTranslations();
+      break;
   }
 }
 
