@@ -19,6 +19,7 @@ function handleMessage(type: string, payload: any) {
       }
       break;
     case MSG.CLEAR_TRANSLATIONS:
+      hideFloatingIndicator();
       removeAllTranslations();
       break;
     case MSG.TRANSLATION_COMPLETE:
@@ -28,10 +29,6 @@ function handleMessage(type: string, payload: any) {
     case MSG.TRANSLATION_ERROR:
       hideFloatingIndicator();
       showErrorBanner(payload.message);
-      break;
-    case MSG.CLEAR_TRANSLATIONS:
-      hideFloatingIndicator();
-      removeAllTranslations();
       break;
   }
 }

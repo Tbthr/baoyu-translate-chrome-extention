@@ -1,8 +1,12 @@
 import type { ParagraphTranslation } from '../shared/types';
-import { getElementBySelector } from './extractor';
 
 const TRANSLATION_CLASS = 'baoyu-translation';
 const CONTAINER_CLASS = 'baoyu-translation-container';
+
+function getElementBySelector(selector: string): HTMLElement | null {
+  if (!selector) return null;
+  return document.querySelector(selector);
+}
 
 export function injectTranslations(translations: ParagraphTranslation[]): void {
   for (const t of translations) {

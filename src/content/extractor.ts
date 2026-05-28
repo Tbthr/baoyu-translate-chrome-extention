@@ -9,12 +9,6 @@ interface ExtractedParagraph {
   element: HTMLElement | null;
 }
 
-let extractedParagraphs: ExtractedParagraph[] = [];
-
-export function getExtractedParagraphs(): ExtractedParagraph[] {
-  return extractedParagraphs;
-}
-
 export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText: string } | null {
   let result: ReturnType<Defuddle['parse']>;
   try {
@@ -31,7 +25,7 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
   const contentElements = tempDiv.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
   if (contentElements.length === 0) return null;
 
-  extractedParagraphs = [];
+  const extractedParagraphs: ExtractedParagraph[] = [];
   let index = 0;
 
   for (const el of contentElements) {
@@ -108,9 +102,4 @@ function generateSelector(el: HTMLElement): string {
     current = parent;
   }
   return path.join(' > ');
-}
-
-export function getElementBySelector(selector: string): HTMLElement | null {
-  if (!selector) return null;
-  return document.querySelector(selector);
 }
