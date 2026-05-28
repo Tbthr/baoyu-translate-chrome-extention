@@ -24,13 +24,6 @@ const mockChrome = {
 
 vi.stubGlobal('chrome', mockChrome);
 
-// Mock keepalive to avoid port connection issues
-vi.mock('./keepalive', () => ({
-  setupPortKeepalive: vi.fn(),
-  startKeepalive: vi.fn(),
-  stopKeepalive: vi.fn(),
-  keepalive: { connect: vi.fn(), disconnect: vi.fn() },
-}));
 
 // Mock cache
 vi.mock('./cache', () => ({

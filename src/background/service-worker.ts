@@ -11,11 +11,35 @@ import {
   urlHash,
 } from '../shared/storage';
 import { getCachedTranslation, saveTranslationCache } from './cache';
-import { startKeepalive, stopKeepalive, setupPortKeepalive } from './keepalive';
 import { translate, AbortError } from './pipeline';
 import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
 
-setupPortKeepalive();
+// Keepalive: inlined from keepalive.ts
+let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+
+function startKeepalive(): void {
+  stopKeepalive();
+  keepaliveInterval = setInterval(() => {
+    chrome.runtime.getPlatformInfo?.();
+  }, 25000);
+}
+
+function stopKeepalive(): void {
+  if (keepaliveInterval) {
+    clearInterval(keepaliveInterval);
+    keepaliveInterval = null;
+  }
+}
+
+// Minimal port listener for future extension (previously setupPortKeepalive)
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'keepalive') {
+    port.onDisconnect.addListener(() => {
+      // Port disconnected, SW may shut down
+    });
+  }
+});
+
 recoverCrashedTask();
 
 let activeTaskId: string | null = null;
