@@ -120,7 +120,7 @@ async function handleStartTranslation(
     task.status = 'completed';
     task.translations = cached.translations;
     await saveTask(hash, task);
-    await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations: cached.translations });
+    await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations: cached.translations }, abortController);
     return { taskId: task.id };
   }
 
@@ -160,7 +160,7 @@ async function handleStartTranslation(
       maxRetries: 2,
     };
     await saveTask(hash, task);
-    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message });
+    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
     clearBadge();
     stopKeepalive();
   });
@@ -196,9 +196,9 @@ async function runTranslation(
         sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
           step: '正在翻译',
           progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
-        });
+        }, abortController);
       } else {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName(progress.step) });
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName(progress.step) }, abortController);
       }
     },
   });
@@ -210,9 +210,9 @@ async function runTranslation(
   // Save to cache
   await saveTranslationCache(task.url, translations, task.mode, config.id);
 
-  await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
-  await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
-  setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
+  await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations }, abortController);
+  await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' }, abortController);
+  setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }, abortController), 2000);
 
   setBadge('完成');
   setTimeout(clearBadge, 5000);
@@ -299,7 +299,7 @@ async function handleRetryTranslation(): Promise<unknown> {
       maxRetries: 2,
     };
     await saveTask(hash, task);
-    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message });
+    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
     clearBadge();
     stopKeepalive();
   });
@@ -307,11 +307,11 @@ async function handleRetryTranslation(): Promise<unknown> {
   return { ok: true };
 }
 
-async function sendToTab(tabId: number, type: string, payload: unknown): Promise<void> {
+export async function sendToTab(tabId: number, type: string, payload: unknown, controller?: AbortController | null): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { type, payload });
   } catch {
-    // Tab may have been closed
+    controller?.abort();
   }
 }
 

@@ -119,4 +119,24 @@ describe('Service worker cancellation integration', () => {
       expect(mockTask.status).toBe('failed');
     });
   });
+
+  describe('sendToTab abort on failure', () => {
+    it('aborts translation pipeline when sendMessage throws', async () => {
+      // Create a mock AbortController with a spy on abort
+      const abortSpy = vi.fn();
+      const mockController = { abort: abortSpy } as unknown as AbortController;
+
+      // Mock sendMessage to throw (simulating tab disconnect)
+      mockChrome.tabs.sendMessage.mockRejectedValue(new Error('Tab closed'));
+
+      // Import sendToTab from service-worker module
+      const { sendToTab } = await import('./service-worker');
+
+      // Call sendToTab with the mock controller
+      await sendToTab(1, MSG.SHOW_FLOATING_INDICATOR, { step: 'test' }, mockController);
+
+      // Verify abort was called when sendMessage threw
+      expect(abortSpy).toHaveBeenCalled();
+    });
+  });
 });
