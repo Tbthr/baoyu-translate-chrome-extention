@@ -63,26 +63,23 @@ export async function analyzeArticle(
 }
 
 export async function translateWithContext(
-  paragraphs: ParagraphTranslation[],
+  batch: ParagraphTranslation[],
   analysis: AnalysisResult,
   provider: { baseUrl: string; apiKey: string; model: string },
   mode: TranslationMode,
 ): Promise<ParagraphTranslation[]> {
-  const batches = splitIntoBatches(paragraphs);
-  const results: ParagraphTranslation[] = [];
+  if (batch.length === 0) return [];
 
   const glossaryStr = analysis.glossary.map((g) => `${g.term} → ${g.translation}（${g.note}）`).join('\n');
   const culturalStr = analysis.culturalNotes.map((c) => `${c.term}: ${c.explanation}`).join('\n');
   const contextBlock = `文章领域：${analysis.domain}\n术语表：\n${glossaryStr}\n文化注释：\n${culturalStr}\n翻译难点：${analysis.difficulties.join('、')}`;
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const batchText = batch.map((p) => p.originalText).join('\n\n');
+  const batchText = batch.map((p) => p.originalText).join('\n\n');
 
-    const messages: ChatMessage[] = [
-      {
-        role: 'system',
-        content: `你是一位专业的英中翻译专家。基于以下分析上下文翻译文章。
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: `你是一位专业的英中翻译专家。基于以下分析上下文翻译文章。
 
 ${contextBlock}
 
@@ -94,20 +91,16 @@ ${contextBlock}
 - 优先使用生动的中文口语，保留原文幽默感
 
 按照原文段落顺序输出翻译，每个段落之间用空行分隔。`,
-      },
-      { role: 'user', content: batchText },
-    ];
+    },
+    { role: 'user', content: batchText },
+  ];
 
-    const result = await withRetry(
-      () => chat({ ...provider, messages, temperature: 0.3 }),
-      MODE_RETRY_LIMITS[mode] ?? 2,
-    );
+  const result = await withRetry(
+    () => chat({ ...provider, messages, temperature: 0.3 }),
+    MODE_RETRY_LIMITS[mode] ?? 2,
+  );
 
-    const translatedParagraphs = parseTranslationResponse(result.content, batch);
-    results.push(...translatedParagraphs);
-  }
-
-  return results;
+  return parseTranslationResponse(result.content, batch);
 }
 
 export async function reviewTranslations(
@@ -183,28 +176,6 @@ export async function polishTranslations(
   return results;
 }
 
-function splitIntoBatches(paragraphs: ParagraphTranslation[]): ParagraphTranslation[][] {
-  const batches: ParagraphTranslation[][] = [];
-  let currentBatch: ParagraphTranslation[] = [];
-  let currentWordCount = 0;
-
-  for (const p of paragraphs) {
-    const wordCount = p.originalText.split(/\s+/).length;
-    if (currentWordCount + wordCount > BATCH_WORD_LIMIT && currentBatch.length > 0) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentWordCount = 0;
-    }
-    currentBatch.push(p);
-    currentWordCount += wordCount;
-  }
-
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-
-  return batches.length > 0 ? batches : [paragraphs];
-}
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {
   let lastError: Error | null = null;
