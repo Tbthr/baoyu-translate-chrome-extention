@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MSG } from '../shared/messages';
+import { urlHash } from '../shared/storage';
+
 const mockChrome = {
   tabs: {
     query: vi.fn(),
@@ -118,13 +120,3 @@ describe('Service worker cancellation integration', () => {
     });
   });
 });
-
-function urlHash(url: string): string {
-  let hash = 0;
-  const normalized = new URL(url).href;
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized.charCodeAt(i);
-    hash = ((hash << 5) - hash + char) | 0;
-  }
-  return Math.abs(hash).toString(36);
-}

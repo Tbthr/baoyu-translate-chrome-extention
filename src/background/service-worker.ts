@@ -168,6 +168,15 @@ async function handleStartTranslation(
   return { taskId: task.id };
 }
 
+const STEP_NAMES: Record<string, string> = {
+  analyze: '正在分析',
+  translate: '正在翻译',
+};
+
+function stepName(step: string): string {
+  return STEP_NAMES[step] ?? step;
+}
+
 async function runTranslation(
   task: TranslationTask,
   fullText: string,
@@ -188,10 +197,7 @@ async function runTranslation(
           progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
         });
       } else {
-        const stepName = progress.step === 'analyze' ? '正在分析'
-          : progress.step === 'translate' ? '正在翻译'
-          : progress.step;
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName });
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName(progress.step) });
       }
     },
   });
