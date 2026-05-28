@@ -97,3 +97,13 @@ export interface ChatResult {
   content: string;
   usage?: { inputTokens: number; outputTokens: number };
 }
+
+export interface PipelineProgress {
+  step: string;
+  batchProgress?: { current: number; total: number };
+}
+
+export interface PipelineOptions {
+  onProgress?: (progress: PipelineProgress) => void;
+  signal?: AbortSignal;
+}

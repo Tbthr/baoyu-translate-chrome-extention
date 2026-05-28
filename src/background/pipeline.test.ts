@@ -1,0 +1,155 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { translate, AbortError } from './pipeline';
+import type { ParagraphTranslation } from '../shared/types';
+
+// Mock the ai-adapter module
+vi.mock('./ai-adapter', () => ({
+  chat: vi.fn(),
+}));
+
+import { chat } from './ai-adapter';
+
+const mockChat = chat as ReturnType<typeof vi.fn>;
+
+function makeParagraph(text: string, index: number, isCode = false): ParagraphTranslation {
+  return {
+    index,
+    originalSelector: '',
+    originalText: text,
+    translatedText: '',
+    isCodeBlock: isCode,
+    batchIndex: 0,
+  };
+}
+
+function mockChatResponse(translatedTexts: string[]) {
+  mockChat.mockResolvedValue({
+    content: translatedTexts.join('\n\n'),
+  });
+}
+
+describe('Pipeline translate()', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('quick mode produces correct translations', async () => {
+    const paragraphs = [
+      makeParagraph('Hello world', 0),
+      makeParagraph('This is a test', 1),
+    ];
+
+    mockChatResponse(['你好世界', '这是一个测试']);
+
+    const result = await translate(paragraphs, 'quick', {
+      baseUrl: 'https://api.test.com',
+      apiKey: 'test-key',
+      model: 'test-model',
+    });
+
+    expect(result).toHaveLength(2);
+    expect(result[0].translatedText).toBe('你好世界');
+    expect(result[1].translatedText).toBe('这是一个测试');
+  });
+
+  it('emits step progress via onProgress callback', async () => {
+    const paragraphs = [
+      makeParagraph('Hello world', 0),
+      makeParagraph('This is a test', 1),
+    ];
+
+    mockChatResponse(['你好世界', '这是一个测试']);
+
+    const progressEvents: { step: string; batchProgress?: { current: number; total: number } }[] = [];
+
+    await translate(paragraphs, 'quick', {
+      baseUrl: 'https://api.test.com',
+      apiKey: 'test-key',
+      model: 'test-model',
+    }, {
+      onProgress: (progress) => progressEvents.push(progress),
+    });
+
+    expect(progressEvents.some(p => p.step === 'translate')).toBe(true);
+    expect(progressEvents.some(p => p.batchProgress !== undefined)).toBe(true);
+  });
+
+  it('reports batch progress for multiple batches', async () => {
+    // Create text that exceeds BATCH_WORD_LIMIT (4000) per batch
+    // Each paragraph has ~300 words to ensure we get multiple batches
+    const longText = Array(300).fill('word').join(' ');
+    const paragraphs = Array.from({ length: 30 }, (_, i) =>
+      makeParagraph(`${longText} paragraph ${i}`, i)
+    );
+
+    // First batch
+    mockChat.mockResolvedValueOnce({
+      content: Array(15).fill('翻译段落一').join('\n\n'),
+    });
+    // Second batch
+    mockChat.mockResolvedValueOnce({
+      content: Array(15).fill('翻译段落二').join('\n\n'),
+    });
+    // Third batch if needed
+    mockChat.mockResolvedValueOnce({
+      content: Array(0).fill('').join('\n\n'),
+    });
+
+    const progressEvents: { step: string; batchProgress?: { current: number; total: number } }[] = [];
+
+    await translate(paragraphs, 'quick', {
+      baseUrl: 'https://api.test.com',
+      apiKey: 'test-key',
+      model: 'test-model',
+    }, {
+      onProgress: (progress) => progressEvents.push(progress),
+    });
+
+    const batchProgressEvents = progressEvents.filter(p => p.batchProgress !== undefined);
+    expect(batchProgressEvents.length).toBeGreaterThanOrEqual(2);
+    expect(batchProgressEvents[0].batchProgress).toEqual({ current: 1, total: expect.any(Number) });
+    expect(batchProgressEvents[1].batchProgress).toEqual({ current: 2, total: expect.any(Number) });
+  });
+
+  it('throws AbortError when signal is aborted during translation', async () => {
+    const paragraphs = [
+      makeParagraph('Hello world', 0),
+      makeParagraph('This is a test', 1),
+    ];
+
+    mockChatResponse(['你好世界', '这是一个测试']);
+
+    const controller = new AbortController();
+    // Abort immediately
+    controller.abort();
+
+    await expect(
+      translate(paragraphs, 'quick', {
+        baseUrl: 'https://api.test.com',
+        apiKey: 'test-key',
+        model: 'test-model',
+      }, {
+        signal: controller.signal,
+      })
+    ).rejects.toThrow(AbortError);
+  });
+
+  it('normal mode throws unimplemented error', async () => {
+    const paragraphs = [makeParagraph('Hello world', 0)];
+
+    await expect(
+      translate(paragraphs, 'normal', {
+        baseUrl: 'https://api.test.com',
+        apiKey: 'test-key',
+        model: 'test-model',
+      })
+    ).rejects.toThrow("Mode 'normal' not yet implemented in pipeline");
+  });
+});
+
+// Helper to mock sequential responses
+function mockChatResponseOnce(responses: string[]) {
+  mockChat.mockResolvedValueOnce({
+    content: responses.join('\n\n'),
+  });
+}
