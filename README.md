@@ -25,11 +25,14 @@
 
 ## 快速开始
 
+要求 Node.js >= 18。
+
 ```bash
-node >= 18
 npm install
-npm run dev     # 开发模式（watch）
-npm run build   # 生产构建
+npm run dev       # 开发模式（watch）
+npm run build     # 生产构建
+npm run test      # 运行测试
+npm run typecheck # 类型检查
 ```
 
 ## 项目结构
@@ -43,25 +46,22 @@ src/
 │   └── popup.css            # Popup 样式
 ├── content/
 │   ├── content.ts           # Content Script 主入口
-│   ├── extractor.ts         # 文章提取器
+│   ├── extractor.ts         # 文章提取器（defuddle）
 │   └── injector.ts          # 双语对照翻译注入器
 ├── background/
-│   ├── service-worker.ts    # Service Worker 主入口
-│   ├── translator.ts        # 三模式翻译引擎
-│   ├── ai-adapter.ts        # OpenAI 兼容 API 适配器
-│   ├── cache.ts             # 翻译缓存管理
-│   └── keepalive.ts         # Service Worker 保活机制
+│   ├── service-worker.ts    # Service Worker 主入口（保活、徽章、消息路由）
+│   ├── task-orchestrator.ts # 翻译任务编排器（状态机、缓存、崩溃恢复）
+│   ├── pipeline.ts          # 三模式翻译管道（分析/翻译/审校/润色）
+│   └── ai-adapter.ts        # OpenAI 兼容 API 适配器
 ├── shared/
 │   ├── types.ts             # TypeScript 类型定义
 │   ├── messages.ts          # 消息类型常量
 │   ├── constants.ts         # 预设 Provider 等常量
-│   └── storage.ts           # chrome.storage 封装
-├── assets/
-│   ├── icon-16.png
-│   ├── icon-48.png
-│   └── icon-128.png
-└── lib/
-    └── readability.js       # Mozilla Readability（内联打包）
+│   └── storage.ts           # chrome.storage 封装（配置、任务、缓存）
+└── assets/
+    ├── icon-16.png
+    ├── icon-48.png
+    └── icon-128.png
 
 dist/                        # Vite 构建输出（加载到 Chrome）
 vite.config.ts               # Vite 配置（多入口构建）

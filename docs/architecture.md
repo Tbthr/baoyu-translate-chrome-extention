@@ -95,7 +95,7 @@ Chrome Extension MV3 三层架构，按职责分为四个模块：
 
 ### R-008: 错误处理与重试策略
 
-**Decision**: 指数退避重试，按模式设置不同上限（快翻/普通 2 次，精翻 3 次）。最终失败时暂停翻译，在页面注入错误横幅，提供操作按钮（重试 / 切换模式 / 取消）。
+**Decision**: 指数退避重试，按模式设置不同上限（快翻/普通 2 次，精翻 3 次）。最终失败时暂停翻译，在页面注入错误横幅，提供操作按钮（重试 / 取消）。
 
 **Rationale**: 网络错误和 API 限流是暂时的，重试能处理大部分失败。精翻投入更多精力值得更多重试次数。用户可见的错误恢复将控制权交还用户。
 
@@ -172,19 +172,19 @@ AnalysisResult (1) ──contains──→ (0..n) GlossaryEntry
 
 ```
 chrome.storage.sync:
-├── provider_config    → ProviderConfig (当前选中的配置)
-├── last_mode          → TranslationMode (上次使用的模式)
+├── provider_config     → { id: string } (当前选中 Provider 的 ID 指针)
+├── provider_configs    → Record<string, ProviderConfig> (所有已保存的 Provider 配置)
+├── last_mode           → TranslationMode (上次使用的模式)
 └── more_settings_open → boolean (更多设置是否展开)
 
 chrome.storage.local:
-├── task_{hash}        → TranslationTask (进行中的任务状态)
-├── cache_{hash}       → TranslationCache (翻译缓存)
-└── task_active_{hash} → boolean (是否有活跃翻译任务标记)
+├── task_{hash}         → TranslationTask (进行中的任务状态)
+└── cache_{hash}        → TranslationCache (翻译缓存)
 ```
 
 ### 缓存规则
 
-- Key: 页面 URL（规范化后）
+- Key: 页面 URL 的哈希值（32-bit hash, base36 编码，格式 `cache_{hash}`）
 - TTL: 24 小时
 - 最大条数: 20
 - 淘汰策略: FIFO（按 timestamp 排序淘汰最早的）
@@ -197,31 +197,32 @@ chrome.storage.local:
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `START_TRANSLATION` | `{ mode }` | 启动翻译任务 |
-| `GET_TASK_STATUS` | `{ url }` | 查询翻译状态 |
-| `CANCEL_TRANSLATION` | `{ taskId }` | 取消翻译 |
-| `RETRY_TRANSLATION` | `{ taskId }` | 从断点重试 |
-| `GET_PROVIDER_CONFIG` | - | 获取 Provider 配置 |
-| `SAVE_PROVIDER_CONFIG` | ProviderConfig | 保存 Provider 配置 |
+| `START_TRANSLATION` | `{ mode: TranslationMode }` | 启动翻译任务 |
+| `GET_TASK_STATUS` | `{ url: string }` | 查询翻译状态 |
+| `CANCEL_TRANSLATION` | - | 取消翻译 |
+| `RETRY_TRANSLATION` | - | 从断点重试 |
+| `GET_PROVIDER_CONFIG` | - | 获取当前 Provider 配置 |
+| `GET_PROVIDER_CONFIG_BY_ID` | `{ providerId: string }` | 按 ID 获取 Provider 配置 |
+| `SAVE_PROVIDER_CONFIG` | `{ config: ProviderConfig }` | 保存 Provider 配置 |
 | `GET_LAST_MODE` | - | 获取上次使用的模式 |
+| `SAVE_LAST_MODE` | `{ mode: TranslationMode }` | 保存上次使用的模式 |
 
 ### Content Script → Service Worker
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `CONTENT_READY` | `{ url }` | 内容脚本就绪通知 |
-| `REQUEST_TRANSLATION` | `{ mode }` | 请求翻译当前页面 |
+| `CONTENT_READY` | `{ url: string }` | 内容脚本就绪通知 |
 
-### Service Worker → Content Script (via Port)
+### Service Worker → Content Script
 
 | Type | Payload | Description |
 |------|---------|-------------|
-| `TRANSLATION_PROGRESS` | TranslationTask | 翻译进度更新 |
-| `INJECT_TRANSLATION` | `{ translations, batchIndex, totalBatches }` | 注入一批翻译结果 |
-| `TRANSLATION_COMPLETE` | `{ translations }` | 翻译完成 |
-| `TRANSLATION_ERROR` | ErrorInfo | 翻译错误 |
-| `REVIEW_UPDATE` | `{ translations }` | 审校/润色更新 |
-| `SHOW_FLOATING_INDICATOR` | `{ step, progress? }` | 显示悬浮指示器 |
+| `INJECT_TRANSLATION` | `{ translations: ParagraphTranslation[] }` | 注入一批翻译结果 |
+| `TRANSLATION_PROGRESS` | `{ step: string }` | 翻译进度更新 |
+| `TRANSLATION_COMPLETE` | `{ translations: ParagraphTranslation[] }` | 翻译完成 |
+| `TRANSLATION_ERROR` | `{ message: string }` | 翻译错误 |
+| `CLEAR_TRANSLATIONS` | - | 清除页面译文 |
+| `SHOW_FLOATING_INDICATOR` | `{ step: string, progress?: string }` | 显示/更新悬浮指示器 |
 
 ### AIAdapter 接口
 
