@@ -1,4 +1,4 @@
-import { MSG } from '../shared/messages';
+import { MSG, type WorkerInbound } from '../shared/messages';
 import { PRESET_PROVIDERS } from '../shared/constants';
 import type { ProviderConfig, TranslationMode } from '../shared/types';
 
@@ -17,10 +17,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupApiKeyToggle();
   setupTranslateButton();
 
-  const mode = await sendMessage(MSG.GET_LAST_MODE);
+  const mode = await sendMessage({ type: MSG.GET_LAST_MODE });
   if (mode) setMode(mode as TranslationMode);
 
-  const config = await sendMessage(MSG.GET_PROVIDER_CONFIG);
+  const config = await sendMessage({ type: MSG.GET_PROVIDER_CONFIG });
   if (config) applyProviderConfig(config as ProviderConfig);
   else renderProviderDropdown();
 
@@ -31,9 +31,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await checkExistingTranslation();
 });
 
-function sendMessage(type: string, payload?: unknown): Promise<unknown> {
+function sendMessage<T extends WorkerInbound>(message: T): Promise<unknown> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type, payload }, (response) => {
+    chrome.runtime.sendMessage(message, (response) => {
       resolve(response);
     });
   });
@@ -83,7 +83,7 @@ function setMode(mode: TranslationMode): void {
   document.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
   const target = document.querySelector(`.seg-btn[data-mode="${mode}"]`);
   if (target) target.classList.add('active');
-  chrome.runtime.sendMessage({ type: 'SAVE_LAST_MODE', payload: mode });
+  sendMessage({ type: MSG.SAVE_LAST_MODE, mode });
 }
 
 function setupProviderDropdown(): void {
@@ -152,12 +152,12 @@ function selectProvider(preset: typeof PRESET_PROVIDERS[number]): void {
         model: currentModel,
         color: prevProvider.color,
       };
-      chrome.runtime.sendMessage({ type: MSG.SAVE_PROVIDER_CONFIG, payload: saveConfig });
+      sendMessage({ type: MSG.SAVE_PROVIDER_CONFIG, config: saveConfig });
     }
   }
 
   // Try to load saved config for the new provider
-  sendMessage(MSG.GET_PROVIDER_CONFIG_BY_ID, preset.id).then((saved) => {
+  sendMessage({ type: MSG.GET_PROVIDER_CONFIG_BY_ID, providerId: preset.id }).then((saved) => {
     const config = saved as ProviderConfig | null;
     $<HTMLSpanElement>('trigger-dot').style.background = preset.color;
     $<HTMLSpanElement>('trigger-name').textContent = preset.name;
@@ -241,7 +241,7 @@ function saveCurrentConfig(): void {
     color: preset.color,
   };
 
-  chrome.runtime.sendMessage({ type: MSG.SAVE_PROVIDER_CONFIG, payload: config });
+  sendMessage({ type: MSG.SAVE_PROVIDER_CONFIG, config });
   currentProvider = config;
 }
 
@@ -274,7 +274,7 @@ function setupTranslateButton(): void {
     setTranslating(true);
     btn.textContent = '翻译中...';
 
-    const response = await sendMessage(MSG.START_TRANSLATION, { mode: currentMode });
+    const response = await sendMessage({ type: MSG.START_TRANSLATION, mode: currentMode });
     if (response && typeof response === 'object' && 'error' in response) {
       setStatus('error', (response as { error: string }).error);
       setTranslating(false);
@@ -290,7 +290,7 @@ async function checkExistingTranslation(): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url) return;
 
-  const taskStatus = await sendMessage(MSG.GET_TASK_STATUS, { url: tab.url });
+  const taskStatus = await sendMessage({ type: MSG.GET_TASK_STATUS, url: tab.url });
   if (taskStatus && typeof taskStatus === 'object' && taskStatus !== null) {
     const task = taskStatus as { status?: string };
     if (task.status === 'completed') {

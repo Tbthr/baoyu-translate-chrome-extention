@@ -1,40 +1,40 @@
-import { MSG } from '../shared/messages';
+import { type WorkerOutbound } from '../shared/messages';
 import { extractContent } from './extractor';
 import { injectTranslations, showFloatingIndicator, hideFloatingIndicator, showErrorBanner, removeAllTranslations } from './injector';
 
-chrome.runtime.sendMessage({ type: MSG.CONTENT_READY, payload: { url: window.location.href } });
+chrome.runtime.sendMessage({ type: 'CONTENT_READY', url: window.location.href });
 
 const port = chrome.runtime.connect({ name: 'keepalive' });
 
-function handleMessage(type: string, payload: any) {
-  switch (type) {
-    case MSG.INJECT_TRANSLATION:
-      injectTranslations(payload.translations);
+function handleMessage(message: WorkerOutbound) {
+  switch (message.type) {
+    case 'INJECT_TRANSLATION':
+      injectTranslations(message.translations);
       break;
-    case MSG.SHOW_FLOATING_INDICATOR:
-      if (payload.step === 'hide') {
+    case 'SHOW_FLOATING_INDICATOR':
+      if (message.step === 'hide') {
         hideFloatingIndicator();
       } else {
-        showFloatingIndicator(payload.step, payload.progress);
+        showFloatingIndicator(message.step, message.progress);
       }
       break;
-    case MSG.CLEAR_TRANSLATIONS:
+    case 'CLEAR_TRANSLATIONS':
       hideFloatingIndicator();
       removeAllTranslations();
       break;
-    case MSG.TRANSLATION_COMPLETE:
+    case 'TRANSLATION_COMPLETE':
       hideFloatingIndicator();
-      injectTranslations(payload.translations);
+      injectTranslations(message.translations);
       break;
-    case MSG.TRANSLATION_ERROR:
+    case 'TRANSLATION_ERROR':
       hideFloatingIndicator();
-      showErrorBanner(payload.message);
+      showErrorBanner(message.message);
       break;
   }
 }
 
-port.onMessage.addListener((message) => {
-  handleMessage(message.type, message.payload);
+port.onMessage.addListener((message: WorkerOutbound) => {
+  handleMessage(message);
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -44,5 +44,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   // Handle translation messages sent via chrome.tabs.sendMessage
-  handleMessage(message.type, message.payload);
+  handleMessage(message as WorkerOutbound);
 });
