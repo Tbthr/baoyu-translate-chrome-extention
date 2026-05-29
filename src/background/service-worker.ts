@@ -1,20 +1,10 @@
 import { MSG, type WorkerInbound } from '../shared/messages';
-import {
-  getProviderConfig,
-  saveProviderConfig,
-  getProviderConfigById,
-  getLastMode,
-  saveLastMode,
-  saveTask,
-  getTask,
-  removeTask,
-  getCachedTranslation,
-  saveCachedTranslation,
-} from '../shared/storage';
-import { translate, AbortError } from './pipeline';
-import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
+import { getProviderConfig } from '../shared/storage';
+import type { TranslationMode, ParagraphTranslation } from '../shared/types';
+import { start, cancel, retry, getStatus, recoverCrashedTasks, type TaskCallbacks } from './task-orchestrator';
 
-// Keepalive: inlined from keepalive.ts
+// ── MV3 infrastructure: keepalive ──────────────────────────────────────────────
+
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
 function startKeepalive(): void {
@@ -37,49 +27,61 @@ chrome.runtime.onConnect.addListener((port) => {
   }
 });
 
-recoverCrashedTask();
+// ── Recovery on startup ─────────────────────────────────────────────────────────
 
-let activeTaskId: string | null = null;
-let activeUrl: string | null = null;
-let abortController: AbortController | null = null;
+recoverCrashedTasks();
 
-async function recoverCrashedTask(): Promise<void> {
-  const all = await chrome.storage.local.get(null);
-  const taskKeys = Object.keys(all).filter((k) => k.startsWith('task_') && !k.startsWith('task_active_'));
+// ── MV3 infrastructure: badge ─────────────────────────────────────────────────
 
-  for (const key of taskKeys) {
-    const task = all[key] as TranslationTask;
-    if (task.status !== 'completed' && task.status !== 'failed') {
-      task.status = 'paused';
-      await chrome.storage.local.set({ [key]: task });
-    }
+function setBadge(text: string): void {
+  chrome.action.setBadgeText({ text: text.slice(0, 4) });
+  chrome.action.setBadgeBackgroundColor({ color: '#1a1a1a' });
+}
+
+function clearBadge(): void {
+  chrome.action.setBadgeText({ text: '' });
+}
+
+// ── Tab communication (Platform API) ──────────────────────────────────────────
+
+async function extractContent(tabId: number): Promise<{ paragraphs: unknown[]; fullText: string } | null> {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_CONTENT' });
+  } catch {
+    return null;
   }
 }
 
-chrome.runtime.onMessage.addListener((message: WorkerInbound, sender, sendResponse) => {
+export async function sendToTab(tabId: number, type: string, payload: unknown, controller?: AbortController | null): Promise<void> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type, payload });
+  } catch {
+    controller?.abort();
+  }
+}
+
+// ── Message routing (Service Worker → thin adapter) ────────────────────────────
+
+chrome.runtime.onMessage.addListener((message: WorkerInbound, _sender, sendResponse) => {
   switch (message.type) {
     case MSG.GET_PROVIDER_CONFIG:
       getProviderConfig().then(sendResponse);
       return true;
 
     case MSG.GET_PROVIDER_CONFIG_BY_ID:
-      getProviderConfigById(message.providerId).then(sendResponse);
-      return true;
+      return false;
 
     case MSG.SAVE_PROVIDER_CONFIG:
-      saveProviderConfig(message.config).then(() => sendResponse({ ok: true }));
-      return true;
+      return false;
 
     case MSG.GET_LAST_MODE:
-      getLastMode().then(sendResponse);
-      return true;
+      return false;
 
     case MSG.SAVE_LAST_MODE:
-      saveLastMode(message.mode);
       return false;
 
     case MSG.START_TRANSLATION:
-      handleStartTranslation(message).then(sendResponse);
+      handleStartTranslation(message.mode).then(sendResponse);
       return true;
 
     case MSG.GET_TASK_STATUS:
@@ -102,9 +104,9 @@ chrome.runtime.onMessage.addListener((message: WorkerInbound, sender, sendRespon
   }
 });
 
-async function handleStartTranslation(
-  message: { type: 'START_TRANSLATION'; mode: TranslationMode },
-): Promise<unknown> {
+// ── Handlers (orchestrator delegation + platform callbacks) ─────────────────────
+
+async function handleStartTranslation(mode: TranslationMode): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return { error: 'No active tab' };
   const tabId = tab.id;
@@ -115,152 +117,72 @@ async function handleStartTranslation(
   const config = await getProviderConfig();
   if (!config?.apiKey) return { error: '请先配置 API Key' };
 
-  activeTaskId = crypto.randomUUID();
-  abortController = new AbortController();
-  activeUrl = url;
-  const task: TranslationTask = {
-    id: activeTaskId,
-    url,
-    mode: message.mode,
-    status: 'pending',
-    translations: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  };
-
-  await saveTask(url, task);
-
-  const cached = await getCachedTranslation(url);
-  if (cached) {
-    task.status = 'completed';
-    task.translations = cached.translations;
-    await saveTask(url, task);
-    await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations: cached.translations }, abortController);
-    return { taskId: task.id };
-  }
-
-  let extraction: { paragraphs: ParagraphTranslation[]; fullText: string } | null = null;
-  try {
-    extraction = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_CONTENT' });
-  } catch {
-    return { error: '无法提取页面内容' };
-  }
-
+  const extraction = await extractContent(tabId);
   if (!extraction || !extraction.paragraphs.length) {
     return { error: '无法识别页面正文内容' };
   }
 
-  task.translations = extraction.paragraphs;
-  await saveTask(url, task);
-
   startKeepalive();
   setBadge('翻译中');
 
-  runTranslation(task, extraction.fullText, config, tabId, abortController.signal).catch(async (err) => {
-    if (err instanceof AbortError) {
-      clearBadge();
-      stopKeepalive();
-      return;
-    }
-
-    task.status = 'failed';
-    task.error = {
-      step: task.currentStep ?? 'translate',
-      batchIndex: task.currentBatch ?? 0,
-      message: err instanceof Error ? err.message : String(err),
-      retryCount: 0,
-      maxRetries: 2,
-    };
-    await saveTask(url, task);
-    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
-    clearBadge();
-    stopKeepalive();
-  });
-
-  return { taskId: task.id };
-}
-
-const STEP_NAMES: Record<string, string> = {
-  analyze: '正在分析',
-  translate: '正在翻译',
-};
-
-function stepName(step: string): string {
-  return STEP_NAMES[step] ?? step;
-}
-
-async function runTranslation(
-  task: TranslationTask,
-  fullText: string,
-  config: ProviderConfig,
-  tabId: number,
-  signal: AbortSignal,
-): Promise<void> {
-  abortController = new AbortController();
-  const provider = { baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model };
-
-  const translations = await translate(task.translations, task.mode, provider, {
-    fullText,
-    signal,
-    onProgress: (progress) => {
-      if (progress.batchProgress) {
+  const callbacks: TaskCallbacks = {
+    onProgress: (step, batch) => {
+      if (batch) {
         sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
           step: '正在翻译',
-          progress: `${progress.batchProgress.current}/${progress.batchProgress.total} 批`,
-        }, abortController);
+          progress: `${batch.current}/${batch.total} 批`,
+        });
       } else {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: stepName(progress.step) }, abortController);
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step });
       }
     },
-  });
+    onComplete: async (translations) => {
+      await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
+      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
+      setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
+      setBadge('完成');
+      setTimeout(clearBadge, 5000);
+      stopKeepalive();
+    },
+    onError: async ({ message }) => {
+      await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message });
+      clearBadge();
+      stopKeepalive();
+    },
+  };
 
-  task.translations = translations;
-  task.status = 'completed';
-  task.updatedAt = Date.now();
-  await saveTask(task.url, task);
+  await start(mode, url, config, {
+    paragraphs: extraction.paragraphs as ParagraphTranslation[],
+    fullText: extraction.fullText,
+  }, callbacks);
 
-  await saveCachedTranslation(task.url, translations, task.mode, config.id);
-
-  await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations }, abortController);
-  await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' }, abortController);
-  setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }, abortController), 2000);
-
-  setBadge('完成');
-  setTimeout(clearBadge, 5000);
-  stopKeepalive();
+  return { ok: true };
 }
 
 async function handleGetTaskStatus(url: string): Promise<unknown> {
   if (!url) return null;
-  return getTask(url);
+  return getStatus(url);
 }
 
 async function handleCancelTranslation(): Promise<unknown> {
-  abortController?.abort();
-  abortController = null;
-  activeTaskId = null;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabId = tab?.id;
 
-  if (activeUrl) {
-    await removeTask(activeUrl);
-    await sendToTabForCurrentPage(MSG.CLEAR_TRANSLATIONS, {});
-    activeUrl = null;
+  // Cancel via orchestrator
+  await cancel();
+
+  // Clear tab state
+  if (tabId) {
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: MSG.CLEAR_TRANSLATIONS, payload: {} });
+    } catch {
+      // Tab may have been closed
+    }
   }
 
   stopKeepalive();
   clearBadge();
   return { ok: true };
-}
-
-async function sendToTabForCurrentPage(type: string, payload: unknown): Promise<void> {
-  if (!activeUrl) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type, payload });
-    } catch {
-      // Tab may have been closed
-    }
-  }
 }
 
 async function handleRetryTranslation(): Promise<unknown> {
@@ -271,55 +193,46 @@ async function handleRetryTranslation(): Promise<unknown> {
   const url = tab.url;
   if (!url) return { error: 'No URL' };
 
-  const task = await getTask(url);
-
-  if (!task) {
-    return { ok: true };
-  }
-
-  await sendToTab(tabId, MSG.CLEAR_TRANSLATIONS, {});
-
   const config = await getProviderConfig();
   if (!config?.apiKey) return { error: '请先配置 API Key' };
 
-  abortController?.abort();
-  abortController = new AbortController();
-  activeTaskId = task.id;
+  // Clear existing translations
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: MSG.CLEAR_TRANSLATIONS, payload: {} });
+  } catch {
+    // Tab may have been closed
+  }
 
   startKeepalive();
   setBadge('翻译中');
 
-  runTranslation(task, '', config, tabId, abortController.signal).catch(async (err) => {
-    task.status = 'failed';
-    task.error = {
-      step: task.currentStep ?? 'translate',
-      batchIndex: task.currentBatch ?? 0,
-      message: err instanceof Error ? err.message : String(err),
-      retryCount: 0,
-      maxRetries: 2,
-    };
-    await saveTask(url, task);
-    await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
-    clearBadge();
-    stopKeepalive();
-  });
+  const callbacks: TaskCallbacks = {
+    onProgress: (step, batch) => {
+      if (batch) {
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
+          step: '正在翻译',
+          progress: `${batch.current}/${batch.total} 批`,
+        });
+      } else {
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step });
+      }
+    },
+    onComplete: async (translations) => {
+      await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
+      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
+      setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
+      setBadge('完成');
+      setTimeout(clearBadge, 5000);
+      stopKeepalive();
+    },
+    onError: async ({ message }) => {
+      await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message });
+      clearBadge();
+      stopKeepalive();
+    },
+  };
+
+  await retry(url, config, callbacks);
 
   return { ok: true };
-}
-
-export async function sendToTab(tabId: number, type: string, payload: unknown, controller?: AbortController | null): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage(tabId, { type, payload });
-  } catch {
-    controller?.abort();
-  }
-}
-
-function setBadge(text: string): void {
-  chrome.action.setBadgeText({ text: text.slice(0, 4) });
-  chrome.action.setBadgeBackgroundColor({ color: '#1a1a1a' });
-}
-
-function clearBadge(): void {
-  chrome.action.setBadgeText({ text: '' });
 }
