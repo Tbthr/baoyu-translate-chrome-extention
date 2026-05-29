@@ -1,4 +1,4 @@
-import { MSG } from '../shared/messages';
+import { MSG, type WorkerInbound } from '../shared/messages';
 import {
   getProviderConfig,
   saveProviderConfig,
@@ -56,36 +56,34 @@ async function recoverCrashedTask(): Promise<void> {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const { type, payload } = message;
-
-  switch (type) {
+chrome.runtime.onMessage.addListener((message: WorkerInbound, sender, sendResponse) => {
+  switch (message.type) {
     case MSG.GET_PROVIDER_CONFIG:
       getProviderConfig().then(sendResponse);
       return true;
 
     case MSG.GET_PROVIDER_CONFIG_BY_ID:
-      getProviderConfigById(payload as string).then(sendResponse);
+      getProviderConfigById(message.providerId).then(sendResponse);
       return true;
 
     case MSG.SAVE_PROVIDER_CONFIG:
-      saveProviderConfig(payload as ProviderConfig).then(() => sendResponse({ ok: true }));
+      saveProviderConfig(message.config).then(() => sendResponse({ ok: true }));
       return true;
 
     case MSG.GET_LAST_MODE:
       getLastMode().then(sendResponse);
       return true;
 
-    case 'SAVE_LAST_MODE':
-      if (payload) saveLastMode(payload as TranslationMode);
+    case MSG.SAVE_LAST_MODE:
+      saveLastMode(message.mode);
       return false;
 
     case MSG.START_TRANSLATION:
-      handleStartTranslation(payload as { mode: TranslationMode }, sender).then(sendResponse);
+      handleStartTranslation(message, sender).then(sendResponse);
       return true;
 
     case MSG.GET_TASK_STATUS:
-      handleGetTaskStatus(payload as { url: string }).then(sendResponse);
+      handleGetTaskStatus(message.url).then(sendResponse);
       return true;
 
     case MSG.CANCEL_TRANSLATION:
@@ -105,7 +103,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleStartTranslation(
-  payload: { mode: TranslationMode },
+  message: { type: 'START_TRANSLATION'; mode: TranslationMode },
   _sender: chrome.runtime.MessageSender,
 ): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -124,7 +122,7 @@ async function handleStartTranslation(
   const task: TranslationTask = {
     id: activeTaskId,
     url,
-    mode: payload.mode,
+    mode: message.mode,
     status: 'pending',
     translations: [],
     createdAt: Date.now(),
@@ -233,9 +231,9 @@ async function runTranslation(
   stopKeepalive();
 }
 
-async function handleGetTaskStatus(payload: { url: string }): Promise<unknown> {
-  if (!payload?.url) return null;
-  return getTask(payload.url);
+async function handleGetTaskStatus(url: string): Promise<unknown> {
+  if (!url) return null;
+  return getTask(url);
 }
 
 async function handleCancelTranslation(): Promise<unknown> {
