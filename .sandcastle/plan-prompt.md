@@ -8,7 +8,8 @@ Here are the open issues in the repo:
 
 </issues-json>
 
-The list above has already been filtered to issues ready for work. IMPORTANT: Do not run your own unfiltered query to find more issues — if the list is empty, there is nothing to do.
+The list above has already been filtered to issues ready for work.
+IMPORTANT: Do not run your own unfiltered query to find more issues — if the list is empty, there is nothing to do.
 
 # TASK
 
