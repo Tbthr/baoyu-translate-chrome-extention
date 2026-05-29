@@ -3,6 +3,34 @@ import { getProviderConfig } from '../shared/storage';
 import type { TranslationMode, ParagraphTranslation } from '../shared/types';
 import { start, cancel, retry, getStatus, recoverCrashedTasks, type TaskCallbacks } from './task-orchestrator';
 
+function makeTranslationCallbacks(tabId: number): TaskCallbacks {
+  return {
+    onProgress: (step, batch) => {
+      if (batch) {
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
+          step: '正在翻译',
+          progress: `${batch.current}/${batch.total} 批`,
+        });
+      } else {
+        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step });
+      }
+    },
+    onComplete: async (translations) => {
+      await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
+      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
+      setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
+      setBadge('完成');
+      setTimeout(clearBadge, 5000);
+      stopKeepalive();
+    },
+    onError: async ({ message }) => {
+      await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message });
+      clearBadge();
+      stopKeepalive();
+    },
+  };
+}
+
 // ── MV3 infrastructure: keepalive ──────────────────────────────────────────────
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
@@ -125,36 +153,10 @@ async function handleStartTranslation(mode: TranslationMode): Promise<unknown> {
   startKeepalive();
   setBadge('翻译中');
 
-  const callbacks: TaskCallbacks = {
-    onProgress: (step, batch) => {
-      if (batch) {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
-          step: '正在翻译',
-          progress: `${batch.current}/${batch.total} 批`,
-        });
-      } else {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step });
-      }
-    },
-    onComplete: async (translations) => {
-      await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
-      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
-      setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
-      setBadge('完成');
-      setTimeout(clearBadge, 5000);
-      stopKeepalive();
-    },
-    onError: async ({ message }) => {
-      await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message });
-      clearBadge();
-      stopKeepalive();
-    },
-  };
-
   await start(mode, url, config, {
     paragraphs: extraction.paragraphs as ParagraphTranslation[],
     fullText: extraction.fullText,
-  }, callbacks);
+  }, makeTranslationCallbacks(tabId));
 
   return { ok: true };
 }
@@ -206,33 +208,7 @@ async function handleRetryTranslation(): Promise<unknown> {
   startKeepalive();
   setBadge('翻译中');
 
-  const callbacks: TaskCallbacks = {
-    onProgress: (step, batch) => {
-      if (batch) {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, {
-          step: '正在翻译',
-          progress: `${batch.current}/${batch.total} 批`,
-        });
-      } else {
-        sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step });
-      }
-    },
-    onComplete: async (translations) => {
-      await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations });
-      await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' });
-      setTimeout(() => sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: 'hide' }), 2000);
-      setBadge('完成');
-      setTimeout(clearBadge, 5000);
-      stopKeepalive();
-    },
-    onError: async ({ message }) => {
-      await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message });
-      clearBadge();
-      stopKeepalive();
-    },
-  };
-
-  await retry(url, config, callbacks);
+  await retry(url, config, makeTranslationCallbacks(tabId));
 
   return { ok: true };
 }
