@@ -6,6 +6,7 @@ import {
   removeTask,
   getCachedTranslation,
   saveCachedTranslation,
+  getAllTasks,
 } from '../shared/storage';
 import { translate, AbortError } from './pipeline';
 
@@ -155,14 +156,12 @@ export async function getStatus(url: string): Promise<TranslationTask | null> {
  * Scans storage for tasks in non-terminal states.
  */
 export async function recoverCrashedTasks(): Promise<void> {
-  const all = await chrome.storage.local.get(null);
-  const taskKeys = Object.keys(all).filter((k) => k.startsWith('task_'));
+  const allTasks = await getAllTasks();
 
-  for (const key of taskKeys) {
-    const task = all[key] as TranslationTask;
-    if (task && task.status !== 'completed' && task.status !== 'failed') {
+  for (const task of allTasks) {
+    if (task.status !== 'completed' && task.status !== 'failed') {
       task.status = 'paused';
-      await chrome.storage.local.set({ [key]: task });
+      await saveTask(task.url, task);
     }
   }
 }

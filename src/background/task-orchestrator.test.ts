@@ -47,13 +47,14 @@ vi.stubGlobal('chrome', mockChrome);
 
 // ── Mock storage module with vi.hoisted ──────────────────────────────────────
 
-const { getTaskMock, saveTaskMock, removeTaskMock, getCachedTranslationMock, saveCachedTranslationMock } = vi.hoisted(() => {
+const { getTaskMock, saveTaskMock, removeTaskMock, getCachedTranslationMock, saveCachedTranslationMock, getAllTasksMock } = vi.hoisted(() => {
   return {
     getTaskMock: vi.fn().mockResolvedValue(null),
     saveTaskMock: vi.fn().mockResolvedValue(undefined),
     removeTaskMock: vi.fn().mockResolvedValue(undefined),
     getCachedTranslationMock: vi.fn().mockResolvedValue(null),
     saveCachedTranslationMock: vi.fn().mockResolvedValue(undefined),
+    getAllTasksMock: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -63,6 +64,7 @@ vi.mock('../shared/storage', () => ({
   removeTask: removeTaskMock,
   getCachedTranslation: getCachedTranslationMock,
   saveCachedTranslation: saveCachedTranslationMock,
+  getAllTasks: getAllTasksMock,
   getProviderConfig: vi.fn().mockResolvedValue({ apiKey: 'test' }),
   getProviderConfigById: vi.fn().mockResolvedValue(null),
   saveProviderConfig: vi.fn().mockResolvedValue(undefined),
@@ -265,8 +267,7 @@ describe('TaskOrchestrator', () => {
 
   describe('recoverCrashedTasks', () => {
     it('marks in-progress tasks as paused', async () => {
-      // Set up a task in non-terminal state
-      mockChrome.storage.local.inner.set('task_abc123', {
+      const pendingTask: TranslationTask = {
         id: 'test-id',
         url: 'https://example.com/article1',
         mode: 'normal',
@@ -274,8 +275,8 @@ describe('TaskOrchestrator', () => {
         translations: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
-      mockChrome.storage.local.inner.set('task_def456', {
+      };
+      const completedTask: TranslationTask = {
         id: 'test-id-2',
         url: 'https://example.com/article2',
         mode: 'quick',
@@ -283,17 +284,20 @@ describe('TaskOrchestrator', () => {
         translations: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
+      };
+
+      getAllTasksMock.mockResolvedValueOnce([pendingTask, completedTask]);
 
       await recoverCrashedTasks();
 
-      // Verify the pending task was marked as paused
-      const pausedTask = mockChrome.storage.local.inner.get('task_abc123') as TranslationTask;
-      expect(pausedTask.status).toBe('paused');
+      // Verify the pending task was marked as paused and saved
+      expect(saveTaskMock).toHaveBeenCalledWith(
+        'https://example.com/article1',
+        expect.objectContaining({ status: 'paused' })
+      );
 
-      // Verify the completed task was not changed
-      const completedTask = mockChrome.storage.local.inner.get('task_def456') as TranslationTask;
-      expect(completedTask.status).toBe('completed');
+      // Verify only non-terminal tasks were updated (completed not saved again)
+      expect(saveTaskMock).toHaveBeenCalledTimes(1);
     });
   });
 

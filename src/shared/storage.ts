@@ -63,6 +63,17 @@ export async function getTask(url: string): Promise<TranslationTask | null> {
   return parsed.success ? parsed.data : null;
 }
 
+export async function getAllTasks(): Promise<TranslationTask[]> {
+  const all = await storageLocal().get(null);
+  const taskKeys = Object.keys(all).filter((k) => k.startsWith('task_'));
+  const tasks: TranslationTask[] = [];
+  for (const key of taskKeys) {
+    const parsed = translationTaskSchema.safeParse(all[key]);
+    if (parsed.success) tasks.push(parsed.data);
+  }
+  return tasks;
+}
+
 export async function saveTask(url: string, task: TranslationTask): Promise<void> {
   const key = `task_${urlHash(url)}`;
   await storageLocal().set({ [key]: task });
