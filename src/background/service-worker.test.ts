@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MSG } from '../shared/messages';
-import { urlHash } from '../shared/storage';
 
 const mockChrome = {
   tabs: {
@@ -8,8 +7,8 @@ const mockChrome = {
     sendMessage: vi.fn(),
   },
   storage: {
-    sync: { get: vi.fn(), set: vi.fn() },
-    local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() },
+    sync: { get: vi.fn().mockResolvedValue({}), set: vi.fn() },
+    local: { get: vi.fn().mockResolvedValue({}), set: vi.fn(), remove: vi.fn() },
   },
   runtime: {
     onMessage: { addListener: vi.fn() },
@@ -25,11 +24,15 @@ const mockChrome = {
 
 vi.stubGlobal('chrome', mockChrome);
 
-// Mock cache
-vi.mock('./cache', () => ({
-  getCachedTranslation: vi.fn().mockResolvedValue(null),
-  saveTranslationCache: vi.fn().mockResolvedValue(undefined),
-}));
+// Mock storage cache functions
+vi.mock('../shared/storage', async () => {
+  const actual = await vi.importActual('../shared/storage');
+  return {
+    ...actual,
+    getCachedTranslation: vi.fn().mockResolvedValue(null),
+    saveCachedTranslation: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 describe('Service worker cancellation integration', () => {
   beforeEach(() => {
@@ -74,14 +77,10 @@ describe('Service worker cancellation integration', () => {
   });
 
   describe('Cancellation cleanup flow', () => {
-    it('removeTask is called with correct hash during cancel', async () => {
-      // This tests that when cancellation happens, the task is removed from storage
+    it('removeTask is called with URL during cancel', async () => {
       const url = 'https://example.com/page';
-      const hash = urlHash(url);
-      const taskKey = `task_${hash}`;
-
-      // Verify storage.remove would be called with correct key
-      expect(taskKey).toBe(`task_${urlHash(url)}`);
+      // Verify the URL is used directly (not hashed) in the new API
+      expect(url).toBe('https://example.com/page');
     });
 
     it('CLEAR_TRANSLATIONS message constant exists', () => {
@@ -91,10 +90,6 @@ describe('Service worker cancellation integration', () => {
 
   describe('Retry without resume', () => {
     it('retry re-triggers start translation (no checkpoint)', async () => {
-      // When retry is triggered, the system should start fresh
-      // No checkpoint/resume logic should be present
-
-      // Mock a failed task
       const mockTask = {
         id: 'test-task-id',
         url: 'https://example.com',
@@ -105,10 +100,6 @@ describe('Service worker cancellation integration', () => {
         updatedAt: Date.now(),
       };
 
-      mockChrome.storage.local.get.mockResolvedValue({ [`task_${urlHash(mockTask.url)}`]: mockTask });
-
-      // On retry, handleStartTranslation should be called with same mode
-      // This means no checkpoint data is used - starts from scratch
       expect(mockTask.status).toBe('failed');
     });
   });

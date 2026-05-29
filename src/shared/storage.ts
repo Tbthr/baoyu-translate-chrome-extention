@@ -1,4 +1,6 @@
-import type { ProviderConfig, TranslationMode } from './types';
+import { z } from 'zod';
+import type { ProviderConfig, TranslationMode, TranslationTask, TranslationCache, ParagraphTranslation } from './types';
+import { CACHE_TTL_MS, CACHE_MAX_ENTRIES } from './constants';
 
 function storageSync(): chrome.storage.StorageArea {
   return chrome.storage.sync;
@@ -7,6 +9,133 @@ function storageSync(): chrome.storage.StorageArea {
 function storageLocal(): chrome.storage.StorageArea {
   return chrome.storage.local;
 }
+
+function urlHash(url: string): string {
+  let hash = 0;
+  const normalized = new URL(url).href;
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+const translationTaskSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  mode: z.enum(['quick', 'normal', 'refined']),
+  status: z.enum(['pending', 'analyzing', 'translating', 'reviewing', 'polishing', 'completed', 'failed', 'paused']),
+  currentStep: z.enum(['analyze', 'translate', 'review', 'polish']).optional(),
+  totalBatches: z.number().optional(),
+  currentBatch: z.number().optional(),
+  analysis: z.object({
+    domain: z.string(),
+    glossary: z.array(z.object({ term: z.string(), translation: z.string(), note: z.string() })),
+    culturalNotes: z.array(z.object({ term: z.string(), explanation: z.string() })),
+    difficulties: z.array(z.string()),
+    summary: z.string(),
+  }).optional(),
+  translations: z.array(z.object({
+    index: z.number(),
+    originalSelector: z.string(),
+    originalText: z.string(),
+    translatedText: z.string(),
+    isCodeBlock: z.boolean(),
+    batchIndex: z.number(),
+  })),
+  error: z.object({
+    step: z.enum(['analyze', 'translate', 'review', 'polish']),
+    batchIndex: z.number(),
+    message: z.string(),
+    retryCount: z.number(),
+    maxRetries: z.number(),
+  }).optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export async function getTask(url: string): Promise<TranslationTask | null> {
+  const key = `task_${urlHash(url)}`;
+  const result = await storageLocal().get(key);
+  const raw = result[key];
+  if (!raw) return null;
+  const parsed = translationTaskSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+export async function saveTask(url: string, task: TranslationTask): Promise<void> {
+  const key = `task_${urlHash(url)}`;
+  await storageLocal().set({ [key]: task });
+}
+
+export async function removeTask(url: string): Promise<void> {
+  const key = `task_${urlHash(url)}`;
+  await storageLocal().remove(key);
+}
+
+// ── Translation cache (chrome.storage.local, with TTL + FIFO eviction) ──
+
+const translationCacheSchema = z.object({
+  url: z.string(),
+  translations: z.array(z.object({
+    index: z.number(),
+    originalSelector: z.string(),
+    originalText: z.string(),
+    translatedText: z.string(),
+    isCodeBlock: z.boolean(),
+    batchIndex: z.number(),
+  })),
+  mode: z.enum(['quick', 'normal', 'refined']),
+  providerId: z.string(),
+  timestamp: z.number(),
+});
+
+export async function getCachedTranslation(url: string): Promise<TranslationCache | null> {
+  const key = `cache_${urlHash(url)}`;
+  const result = await storageLocal().get(key);
+  const raw = result[key];
+  if (!raw) return null;
+  const parsed = translationCacheSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  if (Date.now() - parsed.data.timestamp > CACHE_TTL_MS) {
+    await storageLocal().remove(key);
+    return null;
+  }
+  return parsed.data;
+}
+
+export async function saveCachedTranslation(
+  url: string,
+  translations: ParagraphTranslation[],
+  mode: TranslationMode,
+  providerId: string,
+): Promise<void> {
+  const hash = urlHash(url);
+  await evictIfNeeded();
+  await storageLocal().set({
+    [`cache_${hash}`]: { url, translations, mode, providerId, timestamp: Date.now() },
+  });
+}
+
+async function evictIfNeeded(): Promise<void> {
+  const all = await storageLocal().get(null);
+  const cacheKeys = Object.keys(all).filter((k) => k.startsWith('cache_'));
+  if (cacheKeys.length < CACHE_MAX_ENTRIES) return;
+
+  const entries: Array<{ key: string; timestamp: number }> = [];
+  for (const key of cacheKeys) {
+    const data = all[key] as { timestamp?: number };
+    if (data?.timestamp) entries.push({ key, timestamp: data.timestamp });
+  }
+
+  entries.sort((a, b) => a.timestamp - b.timestamp);
+  const toRemove = entries.slice(0, entries.length - CACHE_MAX_ENTRIES + 1);
+  for (const entry of toRemove) {
+    await storageLocal().remove(entry.key);
+  }
+}
+
+// ── Provider config (chrome.storage.sync) ──
 
 export async function getProviderConfig(): Promise<ProviderConfig | null> {
   const result = await storageSync().get(['provider_config', 'provider_configs']);
@@ -45,51 +174,4 @@ export async function getMoreSettingsOpen(): Promise<boolean> {
 
 export async function saveMoreSettingsOpen(open: boolean): Promise<void> {
   await storageSync().set({ more_settings_open: open });
-}
-
-export async function getTask(urlHash: string): Promise<unknown> {
-  const key = `task_${urlHash}`;
-  const result = await storageLocal().get(key);
-  return result[key] ?? null;
-}
-
-export async function saveTask(urlHash: string, task: unknown): Promise<void> {
-  const key = `task_${urlHash}`;
-  await storageLocal().set({ [key]: task });
-}
-
-export async function removeTask(urlHash: string): Promise<void> {
-  const key = `task_${urlHash}`;
-  await storageLocal().remove(key);
-}
-
-export async function getCache(urlHash: string): Promise<unknown> {
-  const key = `cache_${urlHash}`;
-  const result = await storageLocal().get(key);
-  return result[key] ?? null;
-}
-
-export async function saveCache(urlHash: string, cache: unknown): Promise<void> {
-  const key = `cache_${urlHash}`;
-  await storageLocal().set({ [key]: cache });
-}
-
-export async function removeCache(urlHash: string): Promise<void> {
-  const key = `cache_${urlHash}`;
-  await storageLocal().remove(key);
-}
-
-export async function getAllCacheKeys(): Promise<string[]> {
-  const all = await storageLocal().get(null);
-  return Object.keys(all).filter((k) => k.startsWith('cache_'));
-}
-
-export function urlHash(url: string): string {
-  let hash = 0;
-  const normalized = new URL(url).href;
-  for (let i = 0; i < normalized.length; i++) {
-    const char = normalized.charCodeAt(i);
-    hash = ((hash << 5) - hash + char) | 0;
-  }
-  return Math.abs(hash).toString(36);
 }

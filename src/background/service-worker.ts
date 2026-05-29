@@ -8,9 +8,9 @@ import {
   saveTask,
   getTask,
   removeTask,
-  urlHash,
+  getCachedTranslation,
+  saveCachedTranslation,
 } from '../shared/storage';
-import { getCachedTranslation, saveTranslationCache } from './cache';
 import { translate, AbortError } from './pipeline';
 import type { TranslationTask, TranslationMode, ParagraphTranslation, ProviderConfig } from '../shared/types';
 
@@ -31,12 +31,9 @@ function stopKeepalive(): void {
   }
 }
 
-// Setup port listener for keepalive
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'keepalive') {
-    port.onDisconnect.addListener(() => {
-      // Port disconnected, SW may shut down
-    });
+    port.onDisconnect.addListener(() => {});
   }
 });
 
@@ -100,7 +97,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case MSG.CONTENT_READY:
-      // Content script ready
       return false;
 
     default:
@@ -135,20 +131,17 @@ async function handleStartTranslation(
     updatedAt: Date.now(),
   };
 
-  const hash = urlHash(url);
-  await saveTask(hash, task);
+  await saveTask(url, task);
 
-  // Check cache first
   const cached = await getCachedTranslation(url);
   if (cached) {
     task.status = 'completed';
     task.translations = cached.translations;
-    await saveTask(hash, task);
+    await saveTask(url, task);
     await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations: cached.translations }, abortController);
     return { taskId: task.id };
   }
 
-  // Extract content from page
   let extraction: { paragraphs: ParagraphTranslation[]; fullText: string } | null = null;
   try {
     extraction = await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_CONTENT' });
@@ -161,14 +154,12 @@ async function handleStartTranslation(
   }
 
   task.translations = extraction.paragraphs;
-  await saveTask(hash, task);
+  await saveTask(url, task);
 
   startKeepalive();
   setBadge('翻译中');
 
-  // Run translation in background
-  runTranslation(task, extraction.fullText, config, tabId, hash, abortController.signal).catch(async (err) => {
-    // AbortError means cancelled - clean up silently
+  runTranslation(task, extraction.fullText, config, tabId, abortController.signal).catch(async (err) => {
     if (err instanceof AbortError) {
       clearBadge();
       stopKeepalive();
@@ -183,7 +174,7 @@ async function handleStartTranslation(
       retryCount: 0,
       maxRetries: 2,
     };
-    await saveTask(hash, task);
+    await saveTask(url, task);
     await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
     clearBadge();
     stopKeepalive();
@@ -206,7 +197,6 @@ async function runTranslation(
   fullText: string,
   config: ProviderConfig,
   tabId: number,
-  hash: string,
   signal: AbortSignal,
 ): Promise<void> {
   abortController = new AbortController();
@@ -229,10 +219,10 @@ async function runTranslation(
 
   task.translations = translations;
   task.status = 'completed';
-  await updateTask(hash, task);
+  task.updatedAt = Date.now();
+  await saveTask(task.url, task);
 
-  // Save to cache
-  await saveTranslationCache(task.url, translations, task.mode, config.id);
+  await saveCachedTranslation(task.url, translations, task.mode, config.id);
 
   await sendToTab(tabId, MSG.TRANSLATION_COMPLETE, { translations }, abortController);
   await sendToTab(tabId, MSG.SHOW_FLOATING_INDICATOR, { step: '完成' }, abortController);
@@ -243,15 +233,9 @@ async function runTranslation(
   stopKeepalive();
 }
 
-async function updateTask(hash: string, task: TranslationTask): Promise<void> {
-  task.updatedAt = Date.now();
-  await saveTask(hash, task);
-}
-
 async function handleGetTaskStatus(payload: { url: string }): Promise<unknown> {
   if (!payload?.url) return null;
-  const hash = urlHash(payload.url);
-  return getTask(hash);
+  return getTask(payload.url);
 }
 
 async function handleCancelTranslation(): Promise<unknown> {
@@ -260,8 +244,7 @@ async function handleCancelTranslation(): Promise<unknown> {
   activeTaskId = null;
 
   if (activeUrl) {
-    const hash = urlHash(activeUrl);
-    await removeTask(hash);
+    await removeTask(activeUrl);
     await sendToTabForCurrentPage(MSG.CLEAR_TRANSLATIONS, {});
     activeUrl = null;
   }
@@ -291,17 +274,14 @@ async function handleRetryTranslation(): Promise<unknown> {
   const url = tab.url;
   if (!url) return { error: 'No URL' };
 
-  const hash = urlHash(url);
-  const task = await getTask(hash) as TranslationTask | null;
+  const task = await getTask(url);
 
   if (!task) {
     return { ok: true };
   }
 
-  // Clear existing translations from page before retry
   await sendToTab(tabId, MSG.CLEAR_TRANSLATIONS, {});
 
-  // Start a fresh translation (aborts any current one)
   const config = await getProviderConfig();
   if (!config?.apiKey) return { error: '请先配置 API Key' };
 
@@ -312,8 +292,7 @@ async function handleRetryTranslation(): Promise<unknown> {
   startKeepalive();
   setBadge('翻译中');
 
-  // Run translation in background
-  runTranslation(task, '', config, tabId, hash, abortController.signal).catch(async (err) => {
+  runTranslation(task, '', config, tabId, abortController.signal).catch(async (err) => {
     task.status = 'failed';
     task.error = {
       step: task.currentStep ?? 'translate',
@@ -322,7 +301,7 @@ async function handleRetryTranslation(): Promise<unknown> {
       retryCount: 0,
       maxRetries: 2,
     };
-    await saveTask(hash, task);
+    await saveTask(url, task);
     await sendToTab(tabId, MSG.TRANSLATION_ERROR, { message: task.error.message }, abortController);
     clearBadge();
     stopKeepalive();
