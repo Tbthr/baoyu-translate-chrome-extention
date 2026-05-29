@@ -36,9 +36,7 @@ export class AbortError extends Error {
   }
 }
 
-// =============================================================================
 // Private translator functions (absorbed from translator.ts)
-// =============================================================================
 
 async function quickTranslate(
   batch: ParagraphTranslation[],
@@ -214,9 +212,7 @@ async function polishTranslations(
   return results;
 }
 
-// =============================================================================
 // Private helper functions
-// =============================================================================
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {
   let lastError: Error | null = null;
@@ -239,19 +235,16 @@ function parseTranslationResponse(
 ): ParagraphTranslation[] {
   const lines = content.split(/\n\s*\n/).filter((l) => l.trim());
   const results: ParagraphTranslation[] = [];
+  let translatedIdx = 0;
 
-  const nonCodeOriginals = originalBatch.filter((p) => !p.isCodeBlock);
-
-  for (let i = 0; i < originalBatch.length; i++) {
-    const original = originalBatch[i];
+  for (const original of originalBatch) {
     if (original.isCodeBlock) {
       results.push({ ...original, batchIndex: 0 });
       continue;
     }
-
-    const translatedIdx = nonCodeOriginals.indexOf(original);
     const translatedText = lines[translatedIdx]?.trim() ?? original.originalText;
     results.push({ ...original, translatedText, batchIndex: 0 });
+    translatedIdx++;
   }
 
   return results;
@@ -288,9 +281,7 @@ function parseReviewResponse(
   }));
 }
 
-// =============================================================================
 // Pipeline orchestration
-// =============================================================================
 
 async function translateQuick(
   paragraphs: ParagraphTranslation[],
