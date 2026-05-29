@@ -79,7 +79,7 @@ chrome.runtime.onMessage.addListener((message: WorkerInbound, sender, sendRespon
       return false;
 
     case MSG.START_TRANSLATION:
-      handleStartTranslation(message, sender).then(sendResponse);
+      handleStartTranslation(message).then(sendResponse);
       return true;
 
     case MSG.GET_TASK_STATUS:
@@ -104,7 +104,6 @@ chrome.runtime.onMessage.addListener((message: WorkerInbound, sender, sendRespon
 
 async function handleStartTranslation(
   message: { type: 'START_TRANSLATION'; mode: TranslationMode },
-  _sender: chrome.runtime.MessageSender,
 ): Promise<unknown> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return { error: 'No active tab' };

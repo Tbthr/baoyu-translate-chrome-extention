@@ -43,5 +43,3 @@ const MSG_TYPES = {
 } as const;
 
 export const MSG = MSG_TYPES;
-
-export type MsgType = typeof MSG_TYPES[keyof typeof MSG_TYPES];
