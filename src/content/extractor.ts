@@ -36,7 +36,6 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
 
     const isCodeBlock = !!el.closest('pre') || !!el.closest('code');
     const liveElement = findLiveElement(text);
-    const elementId = liveElement ? tagElement(liveElement) : '';
 
     extractedParagraphs.push({ index, text, isCodeBlock, element: liveElement });
     index++;
@@ -49,7 +48,7 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
     .map((p) => p.text)
     .join('\n\n');
 
-  const paragraphs: ParagraphTranslation[] = extractedParagraphs.map((p, i) => ({
+  const paragraphs: ParagraphTranslation[] = extractedParagraphs.map((p) => ({
     index: p.index,
     originalText: p.text,
     translatedText: '',
