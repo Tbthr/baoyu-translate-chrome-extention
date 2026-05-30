@@ -8,12 +8,37 @@ function getElementBySelector(selector: string): HTMLElement | null {
   return document.querySelector(selector);
 }
 
+function findElementByText(text: string): HTMLElement | null {
+  const candidates = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
+  const trimmed = text.trim();
+
+  for (const el of candidates) {
+    if (el.textContent?.trim() === trimmed) return el as HTMLElement;
+  }
+
+  if (trimmed.length > 40) {
+    const prefix = trimmed.substring(0, 40);
+    for (const el of candidates) {
+      const elText = el.textContent?.trim() ?? '';
+      if (elText.length > 40 && elText.substring(0, 40) === prefix) return el as HTMLElement;
+    }
+  }
+
+  return null;
+}
+
+function findOriginalElement(t: ParagraphTranslation): HTMLElement | null {
+  const bySelector = getElementBySelector(t.originalSelector);
+  if (bySelector) return bySelector;
+  return findElementByText(t.originalText);
+}
+
 export function injectTranslations(translations: ParagraphTranslation[]): void {
   for (const t of translations) {
     if (t.isCodeBlock) continue;
     if (!t.translatedText) continue;
 
-    const original = getElementBySelector(t.originalSelector);
+    const original = findOriginalElement(t);
     if (!original) continue;
 
     removeExistingTranslation(original);
