@@ -1,36 +1,12 @@
 import type { ParagraphTranslation } from '../shared/types';
+import { findTaggedElement, cleanupAllTags } from './element-tagging';
 
 const TRANSLATION_CLASS = 'baoyu-translation';
 const CONTAINER_CLASS = 'baoyu-translation-container';
 
-function getElementBySelector(selector: string): HTMLElement | null {
-  if (!selector) return null;
-  return document.querySelector(selector);
-}
-
-function findElementByText(text: string): HTMLElement | null {
-  const candidates = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote');
-  const trimmed = text.trim();
-
-  for (const el of candidates) {
-    if (el.textContent?.trim() === trimmed) return el as HTMLElement;
-  }
-
-  if (trimmed.length > 40) {
-    const prefix = trimmed.substring(0, 40);
-    for (const el of candidates) {
-      const elText = el.textContent?.trim() ?? '';
-      if (elText.length > 40 && elText.substring(0, 40) === prefix) return el as HTMLElement;
-    }
-  }
-
-  return null;
-}
-
 function findOriginalElement(t: ParagraphTranslation): HTMLElement | null {
-  const bySelector = getElementBySelector(t.originalSelector);
-  if (bySelector) return bySelector;
-  return findElementByText(t.originalText);
+  if (!t.elementId) return null;
+  return findTaggedElement(t.elementId);
 }
 
 export function injectTranslations(translations: ParagraphTranslation[]): void {
@@ -87,6 +63,7 @@ function inheritTextStyles(source: HTMLElement, target: HTMLElement): void {
 
 export function removeAllTranslations(): void {
   document.querySelectorAll(`.${CONTAINER_CLASS}`).forEach((el) => el.remove());
+  cleanupAllTags();
 }
 
 let floatingIndicator: HTMLElement | null = null;

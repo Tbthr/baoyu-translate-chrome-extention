@@ -1,15 +1,17 @@
 import type { ParagraphTranslation } from '../shared/types';
+import { tagElement, cleanupAllTags } from './element-tagging';
 import Defuddle from 'defuddle';
 
 interface ExtractedParagraph {
   index: number;
-  selector: string;
   text: string;
   isCodeBlock: boolean;
   element: HTMLElement | null;
 }
 
 export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText: string } | null {
+  cleanupAllTags();
+
   let result: ReturnType<Defuddle['parse']>;
   try {
     result = new Defuddle(document).parse();
@@ -34,9 +36,9 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
 
     const isCodeBlock = !!el.closest('pre') || !!el.closest('code');
     const liveElement = findLiveElement(text);
-    const selector = liveElement ? generateSelector(liveElement) : '';
+    const elementId = liveElement ? tagElement(liveElement) : '';
 
-    extractedParagraphs.push({ index, selector, text, isCodeBlock, element: liveElement });
+    extractedParagraphs.push({ index, text, isCodeBlock, element: liveElement });
     index++;
   }
 
@@ -47,13 +49,13 @@ export function extractContent(): { paragraphs: ParagraphTranslation[]; fullText
     .map((p) => p.text)
     .join('\n\n');
 
-  const paragraphs: ParagraphTranslation[] = extractedParagraphs.map((p) => ({
+  const paragraphs: ParagraphTranslation[] = extractedParagraphs.map((p, i) => ({
     index: p.index,
-    originalSelector: p.selector,
     originalText: p.text,
     translatedText: '',
     isCodeBlock: p.isCodeBlock,
     batchIndex: 0,
+    elementId: p.element ? tagElement(p.element) : '',
   }));
 
   return { paragraphs, fullText };
@@ -76,30 +78,4 @@ function findLiveElement(text: string): HTMLElement | null {
   }
 
   return null;
-}
-
-function generateSelector(el: HTMLElement): string {
-  if (el.id) return `#${CSS.escape(el.id)}`;
-
-  const path: string[] = [];
-  let current: HTMLElement | null = el;
-  while (current && current !== document.body) {
-    let selector = current.tagName.toLowerCase();
-    if (current.id) {
-      selector = `#${CSS.escape(current.id)}`;
-      path.unshift(selector);
-      break;
-    }
-    const parent: HTMLElement | null = current.parentElement;
-    if (parent) {
-      const siblings = Array.from(parent.children).filter((c: Element) => c.tagName === current!.tagName);
-      if (siblings.length > 1) {
-        const idx = siblings.indexOf(current) + 1;
-        selector += `:nth-of-type(${idx})`;
-      }
-    }
-    path.unshift(selector);
-    current = parent;
-  }
-  return path.join(' > ');
 }

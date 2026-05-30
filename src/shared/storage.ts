@@ -37,11 +37,11 @@ const translationTaskSchema = z.object({
   }).optional(),
   translations: z.array(z.object({
     index: z.number(),
-    originalSelector: z.string(),
     originalText: z.string(),
     translatedText: z.string(),
     isCodeBlock: z.boolean(),
     batchIndex: z.number(),
+    elementId: z.string(),
   })),
   error: z.object({
     step: z.enum(['analyze', 'translate', 'review', 'polish']),
@@ -90,11 +90,11 @@ const translationCacheSchema = z.object({
   url: z.string(),
   translations: z.array(z.object({
     index: z.number(),
-    originalSelector: z.string(),
     originalText: z.string(),
     translatedText: z.string(),
     isCodeBlock: z.boolean(),
     batchIndex: z.number(),
+    elementId: z.string(),
   })),
   mode: z.enum(['quick', 'normal', 'refined']),
   providerId: z.string(),

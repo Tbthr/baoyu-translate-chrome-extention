@@ -42,11 +42,11 @@ export interface AnalysisResult {
 
 export interface ParagraphTranslation {
   index: number;
-  originalSelector: string;
   originalText: string;
   translatedText: string;
   isCodeBlock: boolean;
   batchIndex: number;
+  elementId: string;
 }
 
 export interface TranslationTask {

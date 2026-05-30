@@ -103,7 +103,7 @@ describe('Storage — cache lifecycle', () => {
   it('getCachedTranslation returns null when cache is expired', async () => {
     const url = 'https://example.com/expired';
     await saveCachedTranslation(url, [{
-      index: 0, originalSelector: 'p', originalText: 'Hello', translatedText: '你好', isCodeBlock: false, batchIndex: 0,
+      index: 0, originalText: 'Hello', translatedText: '你好', isCodeBlock: false, batchIndex: 0, elementId: 'test-id',
     }], 'normal', 'openai');
 
     // Corrupt the timestamp to make it expired
@@ -123,7 +123,7 @@ describe('Storage — cache lifecycle', () => {
     for (let i = 0; i < CACHE_MAX_ENTRIES; i++) {
       await saveCachedTranslation(
         `https://example.com/page-${i}`,
-        [{ index: 0, originalSelector: 'p', originalText: `text ${i}`, translatedText: `翻译 ${i}`, isCodeBlock: false, batchIndex: 0 }],
+        [{ index: 0, originalText: `text ${i}`, translatedText: `翻译 ${i}`, isCodeBlock: false, batchIndex: 0, elementId: `id-${i}` }],
         'normal',
         'openai',
       );
@@ -135,7 +135,7 @@ describe('Storage — cache lifecycle', () => {
     // Add one more — should evict the oldest (page-0)
     await saveCachedTranslation(
       'https://example.com/page-overflow',
-      [{ index: 0, originalSelector: 'p', originalText: 'overflow', translatedText: '溢出', isCodeBlock: false, batchIndex: 0 }],
+      [{ index: 0, originalText: 'overflow', translatedText: '溢出', isCodeBlock: false, batchIndex: 0, elementId: 'overflow-id' }],
       'normal',
       'openai',
     );
@@ -150,8 +150,8 @@ describe('Storage — cache lifecycle', () => {
   it('saveCachedTranslation → getCachedTranslation round-trip', async () => {
     const url = 'https://example.com/round-trip';
     const translations = [
-      { index: 0, originalSelector: 'p:nth-of-type(1)', originalText: 'Hello', translatedText: '你好', isCodeBlock: false, batchIndex: 0 },
-      { index: 1, originalSelector: 'p:nth-of-type(2)', originalText: 'World', translatedText: '世界', isCodeBlock: false, batchIndex: 0 },
+      { index: 0, originalText: 'Hello', translatedText: '你好', isCodeBlock: false, batchIndex: 0, elementId: 'el-1' },
+      { index: 1, originalText: 'World', translatedText: '世界', isCodeBlock: false, batchIndex: 0, elementId: 'el-2' },
     ];
 
     await saveCachedTranslation(url, translations, 'refined', 'deepseek');
