@@ -20,9 +20,19 @@ export function findTaggedElement(id: string): HTMLElement | null {
 
 /**
  * Removes all data-baoyu-id attributes from the document.
+ * Also unwraps any text-node wrapper spans created by the extractor.
  */
 export function cleanupAllTags(): void {
   document.querySelectorAll(`[${ATTR_NAME}]`).forEach((el) => {
     el.removeAttribute(ATTR_NAME);
+  });
+
+  // Unwrap <span class="baoyu-text-wrapper"> elements, preserving text content
+  document.querySelectorAll('.baoyu-text-wrapper').forEach((span) => {
+    const parent = span.parentNode;
+    while (span.firstChild) {
+      parent?.insertBefore(span.firstChild, span);
+    }
+    span.remove();
   });
 }
